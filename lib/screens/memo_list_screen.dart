@@ -16,7 +16,7 @@ class _MemoListScreenState extends State<MemoListScreen> {
   List<Memo> _memos = [];
   List<Memo> _filteredMemos = [];
   String? _selectedCategory;
-  
+
   final List<String> _categories = [
     'すべて',
     '植物',
@@ -35,7 +35,7 @@ class _MemoListScreenState extends State<MemoListScreen> {
   }
 
   Future<void> _loadMemos() async {
-    final memos = await DatabaseHelper.instance.readAllMemos();
+    final memos = await DatabaseHelper.instance.readAllMemosWithMapTitle();
     setState(() {
       _memos = memos;
       _applyFilter();
@@ -46,7 +46,8 @@ class _MemoListScreenState extends State<MemoListScreen> {
     if (_selectedCategory == null || _selectedCategory == 'すべて') {
       _filteredMemos = List.from(_memos);
     } else {
-      _filteredMemos = _memos.where((memo) => memo.category == _selectedCategory).toList();
+      _filteredMemos =
+          _memos.where((memo) => memo.category == _selectedCategory).toList();
     }
   }
 
@@ -123,7 +124,8 @@ class _MemoListScreenState extends State<MemoListScreen> {
             color: Colors.grey[100],
             child: Row(
               children: [
-                const Text('カテゴリ: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text('カテゴリ: ',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
                 Expanded(
                   child: DropdownButton<String>(
                     value: _selectedCategory ?? 'すべて',
@@ -143,11 +145,12 @@ class _MemoListScreenState extends State<MemoListScreen> {
                     },
                   ),
                 ),
-                Text('${_filteredMemos.length}件', style: const TextStyle(color: Colors.grey)),
+                Text('${_filteredMemos.length}件',
+                    style: const TextStyle(color: Colors.grey)),
               ],
             ),
           ),
-          
+
           // メモリスト
           Expanded(
             child: _filteredMemos.isEmpty
@@ -155,7 +158,8 @@ class _MemoListScreenState extends State<MemoListScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.note_alt_outlined, size: 64, color: Colors.grey),
+                        Icon(Icons.note_alt_outlined,
+                            size: 64, color: Colors.grey),
                         SizedBox(height: 16),
                         Text('記録がありません', style: TextStyle(color: Colors.grey)),
                       ],
@@ -166,7 +170,8 @@ class _MemoListScreenState extends State<MemoListScreen> {
                     itemBuilder: (context, index) {
                       final memo = _filteredMemos[index];
                       return Card(
-                        margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: 8.0, vertical: 4.0),
                         child: ListTile(
                           leading: Container(
                             width: 40,
@@ -197,16 +202,26 @@ class _MemoListScreenState extends State<MemoListScreen> {
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
+                              if (memo.mapTitle != null)
+                                Text(
+                                  '地図: ${memo.mapTitle}',
+                                  style: const TextStyle(
+                                    color: Colors.blue,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                               if (memo.discoveryTime != null)
                                 Text(
                                   _formatDateTime(memo.discoveryTime),
-                                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                  style: const TextStyle(
+                                      fontSize: 12, color: Colors.grey),
                                 ),
                               if (memo.content.isNotEmpty)
                                 Text(
-                                  memo.content.length > 50 
-                                    ? '${memo.content.substring(0, 50)}...'
-                                    : memo.content,
+                                  memo.content.length > 50
+                                      ? '${memo.content.substring(0, 50)}...'
+                                      : memo.content,
                                   style: const TextStyle(fontSize: 12),
                                 ),
                             ],
@@ -215,10 +230,12 @@ class _MemoListScreenState extends State<MemoListScreen> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               if (memo.specimenNumber != null) ...[
-                                const Icon(Icons.numbers, size: 16, color: Colors.grey),
+                                const Icon(Icons.numbers,
+                                    size: 16, color: Colors.grey),
                                 Text(
                                   memo.specimenNumber!,
-                                  style: const TextStyle(fontSize: 10, color: Colors.grey),
+                                  style: const TextStyle(
+                                      fontSize: 10, color: Colors.grey),
                                 ),
                               ] else ...[
                                 const Icon(Icons.chevron_right),
@@ -229,7 +246,8 @@ class _MemoListScreenState extends State<MemoListScreen> {
                             final result = await Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => MemoDetailScreen(memo: memo),
+                                builder: (context) =>
+                                    MemoDetailScreen(memo: memo),
                               ),
                             );
                             if (result == true) {

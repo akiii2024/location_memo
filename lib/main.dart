@@ -1,6 +1,5 @@
-
 import 'package:flutter/material.dart';
-import 'screens/map_screen.dart';
+import 'package:location_memo/screens/main_screen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -16,8 +15,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: const MapScreen(),
+      home: const MainScreen(),
     );
   }
 }
-

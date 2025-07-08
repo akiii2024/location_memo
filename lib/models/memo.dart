@@ -9,6 +9,9 @@ class Memo {
   String? specimenNumber;
   String? category;
   String? notes;
+  int? pinNumber; // ピン番号を追加
+  int? mapId; // 地図ID
+  String? mapTitle; // 地図の名前
 
   Memo({
     this.id,
@@ -21,6 +24,9 @@ class Memo {
     this.specimenNumber,
     this.category,
     this.notes,
+    this.pinNumber, // ピン番号を追加
+    this.mapId, // 地図ID
+    this.mapTitle, // 地図の名前
   });
 
   Map<String, dynamic> toMap() {
@@ -35,6 +41,8 @@ class Memo {
       'specimenNumber': specimenNumber,
       'category': category,
       'notes': notes,
+      'pinNumber': pinNumber, // ピン番号を追加
+      'mapId': mapId, // 地図ID
     };
   }
 
@@ -45,13 +53,16 @@ class Memo {
       content: map['content'],
       latitude: map['latitude'],
       longitude: map['longitude'],
-      discoveryTime: map['discoveryTime'] != null 
+      discoveryTime: map['discoveryTime'] != null
           ? DateTime.fromMillisecondsSinceEpoch(map['discoveryTime'])
           : null,
       discoverer: map['discoverer'],
       specimenNumber: map['specimenNumber'],
       category: map['category'],
       notes: map['notes'],
+      pinNumber: map['pinNumber'], // ピン番号を追加
+      mapId: map['mapId'], // 地図ID
+      mapTitle: map['mapTitle'], // 地図の名前（JOINクエリで取得）
     );
   }
 }

@@ -17,11 +17,11 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
   late TextEditingController _discovererController;
   late TextEditingController _specimenNumberController;
   late TextEditingController _notesController;
-  
+
   bool _isEditing = false;
   DateTime? _discoveryTime;
   String? _selectedCategory;
-  
+
   final List<String> _categories = [
     '植物',
     '動物',
@@ -37,8 +37,10 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
     super.initState();
     _titleController = TextEditingController(text: widget.memo.title);
     _contentController = TextEditingController(text: widget.memo.content);
-    _discovererController = TextEditingController(text: widget.memo.discoverer ?? '');
-    _specimenNumberController = TextEditingController(text: widget.memo.specimenNumber ?? '');
+    _discovererController =
+        TextEditingController(text: widget.memo.discoverer ?? '');
+    _specimenNumberController =
+        TextEditingController(text: widget.memo.specimenNumber ?? '');
     _notesController = TextEditingController(text: widget.memo.notes ?? '');
     _discoveryTime = widget.memo.discoveryTime;
     _selectedCategory = widget.memo.category;
@@ -77,6 +79,82 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
     return '${dateTime.year}/${dateTime.month.toString().padLeft(2, '0')}/${dateTime.day.toString().padLeft(2, '0')} ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
 
+  // ピン番号編集ダイアログを表示
+  void _showPinNumberDialog() {
+    final TextEditingController controller = TextEditingController(
+      text: widget.memo.pinNumber?.toString() ?? '',
+    );
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('ピン番号を編集'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('「${widget.memo.title}」のピン番号を設定してください'),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'ピン番号',
+                  hintText: '1, 2, 3...',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('キャンセル'),
+            ),
+            TextButton(
+              onPressed: () async {
+                final newNumber = int.tryParse(controller.text);
+                if (newNumber != null && newNumber > 0) {
+                  // メモを更新
+                  final updatedMemo = Memo(
+                    id: widget.memo.id,
+                    title: widget.memo.title,
+                    content: widget.memo.content,
+                    latitude: widget.memo.latitude,
+                    longitude: widget.memo.longitude,
+                    discoveryTime: widget.memo.discoveryTime,
+                    discoverer: widget.memo.discoverer,
+                    specimenNumber: widget.memo.specimenNumber,
+                    category: widget.memo.category,
+                    notes: widget.memo.notes,
+                    pinNumber: newNumber,
+                  );
+
+                  await DatabaseHelper.instance.update(updatedMemo);
+
+                  // 画面を更新
+                  setState(() {
+                    widget.memo.pinNumber = newNumber;
+                  });
+
+                  Navigator.of(context).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('ピン番号を $newNumber に更新しました')),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('有効な番号を入力してください')),
+                  );
+                }
+              },
+              child: const Text('保存'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildViewMode() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16.0),
@@ -90,7 +168,9 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('タイトル', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                  const Text('タイトル',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, color: Colors.grey)),
                   const SizedBox(height: 4),
                   Text(widget.memo.title, style: const TextStyle(fontSize: 18)),
                 ],
@@ -106,52 +186,88 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('基本情報', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const Text('基本情報',
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),
-                  
                   if (widget.memo.category != null) ...[
                     Row(
                       children: [
-                        const Icon(Icons.category, size: 16, color: Colors.grey),
+                        const Icon(Icons.category,
+                            size: 16, color: Colors.grey),
                         const SizedBox(width: 8),
-                        const Text('カテゴリ: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                        const Text('カテゴリ: ',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
                         Text(widget.memo.category!),
                       ],
                     ),
                     const SizedBox(height: 8),
                   ],
-                  
                   if (widget.memo.discoveryTime != null) ...[
                     Row(
                       children: [
-                        const Icon(Icons.schedule, size: 16, color: Colors.grey),
+                        const Icon(Icons.schedule,
+                            size: 16, color: Colors.grey),
                         const SizedBox(width: 8),
-                        const Text('発見日時: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                        const Text('発見日時: ',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
                         Text(_formatDateTime(widget.memo.discoveryTime)),
                       ],
                     ),
                     const SizedBox(height: 8),
                   ],
-                  
                   if (widget.memo.discoverer != null) ...[
                     Row(
                       children: [
                         const Icon(Icons.person, size: 16, color: Colors.grey),
                         const SizedBox(width: 8),
-                        const Text('発見者: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                        const Text('発見者: ',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
                         Text(widget.memo.discoverer!),
                       ],
                     ),
                     const SizedBox(height: 8),
                   ],
-                  
                   if (widget.memo.specimenNumber != null) ...[
                     Row(
                       children: [
                         const Icon(Icons.numbers, size: 16, color: Colors.grey),
                         const SizedBox(width: 8),
-                        const Text('標本番号: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                        const Text('標本番号: ',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
                         Text(widget.memo.specimenNumber!),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  if (widget.memo.pinNumber != null) ...[
+                    Row(
+                      children: [
+                        const Icon(Icons.push_pin,
+                            size: 16, color: Colors.grey),
+                        const SizedBox(width: 8),
+                        const Text('ピン番号: ',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text('${widget.memo.pinNumber}'),
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: _showPinNumberDialog,
+                          child: const Icon(Icons.edit,
+                              size: 16, color: Colors.blue),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  if (widget.memo.mapTitle != null) ...[
+                    Row(
+                      children: [
+                        const Icon(Icons.map, size: 16, color: Colors.grey),
+                        const SizedBox(width: 8),
+                        const Text('地図: ',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text(widget.memo.mapTitle!,
+                            style: const TextStyle(color: Colors.blue)),
                       ],
                     ),
                   ],
@@ -169,7 +285,9 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('内容・説明', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                    const Text('内容・説明',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, color: Colors.grey)),
                     const SizedBox(height: 8),
                     Text(widget.memo.content),
                   ],
@@ -187,7 +305,9 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('備考', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                    const Text('備考',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, color: Colors.grey)),
                     const SizedBox(height: 8),
                     Text(widget.memo.notes!),
                   ],
@@ -198,20 +318,25 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
           ],
 
           // 位置情報
-          if (widget.memo.latitude != null && widget.memo.longitude != null) ...[
+          if (widget.memo.latitude != null &&
+              widget.memo.longitude != null) ...[
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('位置情報', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                    const Text('位置情報',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, color: Colors.grey)),
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        const Icon(Icons.location_on, size: 16, color: Colors.grey),
+                        const Icon(Icons.location_on,
+                            size: 16, color: Colors.grey),
                         const SizedBox(width: 8),
-                        Text('緯度: ${widget.memo.latitude!.toStringAsFixed(6)}\n経度: ${widget.memo.longitude!.toStringAsFixed(6)}'),
+                        Text(
+                            '緯度: ${widget.memo.latitude!.toStringAsFixed(6)}\n経度: ${widget.memo.longitude!.toStringAsFixed(6)}'),
                       ],
                     ),
                   ],
@@ -231,9 +356,10 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // 基本情報
-          const Text('基本情報', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const Text('基本情報',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
-          
+
           TextField(
             controller: _titleController,
             decoration: const InputDecoration(
@@ -299,7 +425,8 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
           const SizedBox(height: 24),
 
           // 詳細情報
-          const Text('詳細情報', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const Text('詳細情報',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
 
           TextField(
@@ -327,8 +454,10 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
           const SizedBox(height: 24),
 
           // 位置情報（読み取り専用）
-          if (widget.memo.latitude != null && widget.memo.longitude != null) ...[
-            const Text('位置情報', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          if (widget.memo.latitude != null &&
+              widget.memo.longitude != null) ...[
+            const Text('位置情報',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             Card(
               child: Padding(
@@ -336,9 +465,12 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('位置情報（読み取り専用）', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                    const Text('位置情報（読み取り専用）',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, color: Colors.grey)),
                     const SizedBox(height: 8),
-                    Text('緯度: ${widget.memo.latitude!.toStringAsFixed(6)}\n経度: ${widget.memo.longitude!.toStringAsFixed(6)}'),
+                    Text(
+                        '緯度: ${widget.memo.latitude!.toStringAsFixed(6)}\n経度: ${widget.memo.longitude!.toStringAsFixed(6)}'),
                   ],
                 ),
               ),
@@ -365,12 +497,19 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                   latitude: widget.memo.latitude,
                   longitude: widget.memo.longitude,
                   discoveryTime: _discoveryTime,
-                  discoverer: _discovererController.text.trim().isEmpty ? null : _discovererController.text.trim(),
-                  specimenNumber: _specimenNumberController.text.trim().isEmpty ? null : _specimenNumberController.text.trim(),
+                  discoverer: _discovererController.text.trim().isEmpty
+                      ? null
+                      : _discovererController.text.trim(),
+                  specimenNumber: _specimenNumberController.text.trim().isEmpty
+                      ? null
+                      : _specimenNumberController.text.trim(),
                   category: _selectedCategory,
-                  notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+                  notes: _notesController.text.trim().isEmpty
+                      ? null
+                      : _notesController.text.trim(),
+                  pinNumber: widget.memo.pinNumber, // ピン番号を保持
                 );
-                
+
                 await DatabaseHelper.instance.update(updatedMemo);
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('記録を更新しました')),
@@ -404,7 +543,8 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                   _titleController.text = widget.memo.title;
                   _contentController.text = widget.memo.content;
                   _discovererController.text = widget.memo.discoverer ?? '';
-                  _specimenNumberController.text = widget.memo.specimenNumber ?? '';
+                  _specimenNumberController.text =
+                      widget.memo.specimenNumber ?? '';
                   _notesController.text = widget.memo.notes ?? '';
                   _discoveryTime = widget.memo.discoveryTime;
                   _selectedCategory = widget.memo.category;

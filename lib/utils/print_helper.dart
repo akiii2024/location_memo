@@ -1,24 +1,348 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:google_fonts/google_fonts.dart';
+
 import '../models/memo.dart';
 
 class PrintHelper {
-  static Future<void> printMemoReport(List<Memo> memos, {String? mapImagePath}) async {
+  // 日本語フォントを取得するヘルパーメソッド
+  static Future<pw.Font> _getJapaneseFont() async {
+    try {
+      // assetsからNotoSansJPフォントを読み込み
+      final fontData =
+          await rootBundle.load('assets/fonts/NotoSansJP-Regular.ttf');
+      return pw.Font.ttf(fontData);
+    } catch (e) {
+      print('日本語フォント取得エラー: $e');
+      // フォールバック: オンラインのNotoSansを試行
+      try {
+        return await PdfGoogleFonts.notoSansRegular();
+      } catch (e2) {
+        print('オンラインフォント取得エラー: $e2');
+        // 最終フォールバック: デフォルトフォント
+        return pw.Font.helvetica();
+      }
+    }
+  }
+
+  static Future<pw.Font> _getJapaneseBoldFont() async {
+    try {
+      // assetsからNotoSansJPボールドフォントを読み込み
+      final fontData =
+          await rootBundle.load('assets/fonts/NotoSansJP-Bold.ttf');
+      return pw.Font.ttf(fontData);
+    } catch (e) {
+      print('日本語ボールドフォント取得エラー: $e');
+      // フォールバック: オンラインのNotoSansを試行
+      try {
+        return await PdfGoogleFonts.notoSansBold();
+      } catch (e2) {
+        print('オンラインボールドフォント取得エラー: $e2');
+        // 最終フォールバック: デフォルトフォント
+        return pw.Font.helveticaBold();
+      }
+    }
+  }
+
+  // テキストスタイルを作成するヘルパーメソッド
+  static pw.TextStyle _createTextStyle(pw.Font font, double fontSize,
+      {PdfColor? color}) {
+    return pw.TextStyle(
+      font: font,
+      fontSize: fontSize,
+      color: color,
+      // 日本語をサポートするフォントのみをフォールバックに使用
+      // 必要に応じて他の日本語フォントを追加可能
+    );
+  }
+
+  // 地図画像とピンを合成するヘルパー関数
+  static Future<Uint8List> _createMapWithPins(
+    String mapImagePath,
+    List<Memo> memos,
+    double mapWidth,
+    double mapHeight,
+  ) async {
+    // 地図画像を読み込み
+    final mapImageBytes = await File(mapImagePath).readAsBytes();
+    final mapImage = await decodeImageFromList(mapImageBytes);
+
+    // キャンバスを作成
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+
+    // 地図画像を描画
+    final paint = Paint();
+    canvas.drawImage(mapImage, Offset.zero, paint);
+
+    // 実際の画像サイズを使用
+    final actualImageWidth = mapImage.width.toDouble();
+    final actualImageHeight = mapImage.height.toDouble();
+
+    // BoxFit.containの計算を行う（地図ウィジェットと同じ計算）
+    final containerAspect = mapWidth / mapHeight;
+    final imageAspect = actualImageWidth / actualImageHeight;
+
+    double actualDisplayWidth, actualDisplayHeight, offsetX, offsetY;
+
+    if (imageAspect > containerAspect) {
+      // 画像の方が横長 - 幅に合わせる
+      actualDisplayWidth = mapWidth;
+      actualDisplayHeight = mapWidth / imageAspect;
+      offsetX = 0.0;
+      offsetY = (mapHeight - actualDisplayHeight) / 2;
+    } else {
+      // 画像の方が縦長または同じ - 高さに合わせる
+      actualDisplayWidth = mapHeight * imageAspect;
+      actualDisplayHeight = mapHeight;
+      offsetX = (mapWidth - actualDisplayWidth) / 2;
+      offsetY = 0.0;
+    }
+
+    // 表示座標から実際の画像座標への変換スケール
+    final scaleX = actualImageWidth / actualDisplayWidth;
+    final scaleY = actualImageHeight / actualDisplayHeight;
+
+    // ピンを描画
+    for (final memo in memos) {
+      if (memo.latitude != null && memo.longitude != null) {
+        // 地図ウィジェットと同じ計算方法でピン位置を計算
+        final displayPinX = memo.latitude! * actualDisplayWidth + offsetX;
+        final displayPinY = memo.longitude! * actualDisplayHeight + offsetY;
+
+        // 表示座標を実際の画像座標に変換
+        final imagePinX = displayPinX * scaleX;
+        final imagePinY = displayPinY * scaleY;
+
+        // ピンの色を決定
+        final pinColor = _getCategoryColor(memo.category);
+
+        // ピンのサイズを実際の画像サイズに合わせて調整
+        final pinRadius = 15 * ((scaleX + scaleY) / 2);
+        final strokeWidth = 2 * ((scaleX + scaleY) / 2);
+
+        // ピンの円を描画
+        final pinPaint = Paint()
+          ..color = pinColor
+          ..style = PaintingStyle.fill;
+
+        canvas.drawCircle(
+          Offset(imagePinX, imagePinY),
+          pinRadius,
+          pinPaint,
+        );
+
+        // ピンの境界線を描画
+        final borderPaint = Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = strokeWidth;
+
+        canvas.drawCircle(
+          Offset(imagePinX, imagePinY),
+          pinRadius,
+          borderPaint,
+        );
+
+        // ピン番号を描画
+        if (memo.pinNumber != null) {
+          final fontSize = 12 * ((scaleX + scaleY) / 2);
+          final textPainter = TextPainter(
+            text: TextSpan(
+              text: '${memo.pinNumber}',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: fontSize,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            textDirection: TextDirection.ltr,
+          );
+          textPainter.layout();
+          textPainter.paint(
+            canvas,
+            Offset(
+              imagePinX - textPainter.width / 2,
+              imagePinY - textPainter.height / 2,
+            ),
+          );
+        }
+      }
+    }
+
+    // 画像を生成
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(
+      mapImage.width,
+      mapImage.height,
+    );
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return byteData!.buffer.asUint8List();
+  }
+
+  // カテゴリに応じた色を取得
+  static Color _getCategoryColor(String? category) {
+    switch (category) {
+      case '植物':
+        return Colors.green;
+      case '動物':
+        return Colors.brown;
+      case '昆虫':
+        return Colors.orange;
+      case '鉱物':
+        return Colors.grey;
+      case '化石':
+        return Colors.purple;
+      case '地形':
+        return Colors.blue;
+      default:
+        return Colors.blue;
+    }
+  }
+
+  // ピン付き地図を印刷する新しいメソッド
+  static Future<void> printMapWithPins(
+    String? mapImagePath,
+    List<Memo> memos,
+    double mapWidth,
+    double mapHeight,
+  ) async {
+    if (mapImagePath == null || !File(mapImagePath).existsSync()) {
+      throw Exception('地図画像が見つかりません');
+    }
+
+    // 地図画像とピンを合成
+    final combinedImageBytes = await _createMapWithPins(
+      mapImagePath,
+      memos,
+      mapWidth,
+      mapHeight,
+    );
+
+    // 日本語フォントを取得
+    final font = await _getJapaneseFont();
+    final boldFont = await _getJapaneseBoldFont();
+
     final pdf = pw.Document();
 
-    // デフォルトフォントを使用（日本語サポートなし）
-    final font = pw.Font.helvetica();
-    final boldFont = pw.Font.helveticaBold();
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(20),
+        build: (pw.Context context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                'フィールドワーク地図（ピン付き）',
+                style: _createTextStyle(boldFont, 18),
+              ),
+              pw.SizedBox(height: 20),
+              pw.Expanded(
+                child: pw.Container(
+                  width: double.infinity,
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(color: PdfColors.grey400),
+                  ),
+                  child: pw.Image(
+                    pw.MemoryImage(combinedImageBytes),
+                    fit: pw.BoxFit.contain,
+                  ),
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Text(
+                'ピン数: ${memos.where((m) => m.latitude != null && m.longitude != null).length}個',
+                style: _createTextStyle(font, 12),
+              ),
+              pw.Text(
+                '印刷日時: ${DateTime.now().toString().substring(0, 19)}',
+                style: _createTextStyle(font, 12),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    // PDFを表示・印刷
+    await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdf.save());
+  }
+
+  static Future<void> printMapImage(String? mapImagePath) async {
+    if (mapImagePath == null || !File(mapImagePath).existsSync()) {
+      throw Exception('地図画像が見つかりません');
+    }
+
+    // 日本語フォントを取得
+    final font = await _getJapaneseFont();
+    final boldFont = await _getJapaneseBoldFont();
+
+    final pdf = pw.Document();
+    final mapImageBytes = await File(mapImagePath).readAsBytes();
+
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(20),
+        build: (pw.Context context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                'フィールドワーク地図',
+                style: _createTextStyle(boldFont, 18),
+              ),
+              pw.SizedBox(height: 20),
+              pw.Expanded(
+                child: pw.Container(
+                  width: double.infinity,
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(color: PdfColors.grey400),
+                  ),
+                  child: pw.Image(
+                    pw.MemoryImage(mapImageBytes),
+                    fit: pw.BoxFit.contain,
+                  ),
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Text(
+                '印刷日時: ${DateTime.now().toString().substring(0, 19)}',
+                style: _createTextStyle(font, 12),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    // PDFを表示・印刷
+    await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdf.save());
+  }
+
+  static Future<void> printMemoReport(List<Memo> memos,
+      {String? mapImagePath}) async {
+    final pdf = pw.Document();
+
+    // 日本語フォントを取得
+    final font = await _getJapaneseFont();
+    final boldFont = await _getJapaneseBoldFont();
 
     // 地図付きページを追加
     if (mapImagePath != null && File(mapImagePath).existsSync()) {
       final mapImageBytes = await File(mapImagePath).readAsBytes();
-      
+
       pdf.addPage(
         pw.Page(
           pageFormat: PdfPageFormat.a4,
@@ -29,10 +353,7 @@ class PrintHelper {
               children: [
                 pw.Text(
                   'フィールドワーク記録地図',
-                  style: pw.TextStyle(
-                    font: boldFont,
-                    fontSize: 18,
-                  ),
+                  style: _createTextStyle(boldFont, 18),
                 ),
                 pw.SizedBox(height: 20),
                 pw.Expanded(
@@ -50,11 +371,11 @@ class PrintHelper {
                 pw.SizedBox(height: 10),
                 pw.Text(
                   '記録数: ${memos.length}件',
-                  style: pw.TextStyle(font: font, fontSize: 12),
+                  style: _createTextStyle(font, 12),
                 ),
                 pw.Text(
                   '印刷日時: ${DateTime.now().toString().substring(0, 19)}',
-                  style: pw.TextStyle(font: font, fontSize: 12),
+                  style: _createTextStyle(font, 12),
                 ),
               ],
             );
@@ -73,10 +394,7 @@ class PrintHelper {
             return [
               pw.Text(
                 '記録一覧',
-                style: pw.TextStyle(
-                  font: boldFont,
-                  fontSize: 18,
-                ),
+                style: _createTextStyle(boldFont, 18),
               ),
               pw.SizedBox(height: 20),
               ...memos.map((memo) => _buildMemoItem(memo, font, boldFont)),
@@ -87,7 +405,8 @@ class PrintHelper {
     }
 
     // PDFを表示・印刷
-    await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save());
+    await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdf.save());
   }
 
   static pw.Widget _buildMemoItem(Memo memo, pw.Font font, pw.Font boldFont) {
@@ -103,32 +422,29 @@ class PrintHelper {
         children: [
           pw.Text(
             memo.title,
-            style: pw.TextStyle(
-              font: boldFont,
-              fontSize: 14,
-            ),
+            style: _createTextStyle(boldFont, 14),
           ),
           pw.SizedBox(height: 5),
-          
+
           // 基本情報
           pw.Row(
             children: [
               if (memo.category != null) ...[
                 pw.Text(
                   'カテゴリ: ${memo.category}',
-                  style: pw.TextStyle(font: font, fontSize: 10),
+                  style: _createTextStyle(font, 10),
                 ),
                 pw.SizedBox(width: 20),
               ],
               if (memo.discoveryTime != null) ...[
                 pw.Text(
                   '発見日時: ${_formatDateTime(memo.discoveryTime!)}',
-                  style: pw.TextStyle(font: font, fontSize: 10),
+                  style: _createTextStyle(font, 10),
                 ),
               ],
             ],
           ),
-          
+
           if (memo.discoverer != null || memo.specimenNumber != null) ...[
             pw.SizedBox(height: 3),
             pw.Row(
@@ -136,41 +452,41 @@ class PrintHelper {
                 if (memo.discoverer != null) ...[
                   pw.Text(
                     '発見者: ${memo.discoverer}',
-                    style: pw.TextStyle(font: font, fontSize: 10),
+                    style: _createTextStyle(font, 10),
                   ),
                   pw.SizedBox(width: 20),
                 ],
                 if (memo.specimenNumber != null) ...[
                   pw.Text(
                     '標本番号: ${memo.specimenNumber}',
-                    style: pw.TextStyle(font: font, fontSize: 10),
+                    style: _createTextStyle(font, 10),
                   ),
                 ],
               ],
             ),
           ],
-          
+
           if (memo.content.isNotEmpty) ...[
             pw.SizedBox(height: 8),
             pw.Text(
               '説明: ${memo.content}',
-              style: pw.TextStyle(font: font, fontSize: 11),
+              style: _createTextStyle(font, 11),
             ),
           ],
-          
+
           if (memo.notes != null && memo.notes!.isNotEmpty) ...[
             pw.SizedBox(height: 5),
             pw.Text(
               '備考: ${memo.notes}',
-              style: pw.TextStyle(font: font, fontSize: 10, color: PdfColors.grey600),
+              style: _createTextStyle(font, 10, color: PdfColors.grey600),
             ),
           ],
-          
+
           if (memo.latitude != null && memo.longitude != null) ...[
             pw.SizedBox(height: 5),
             pw.Text(
               '位置: (${memo.latitude!.toStringAsFixed(6)}, ${memo.longitude!.toStringAsFixed(6)})',
-              style: pw.TextStyle(font: font, fontSize: 9, color: PdfColors.grey600),
+              style: _createTextStyle(font, 9, color: PdfColors.grey600),
             ),
           ],
         ],
@@ -186,20 +502,24 @@ class PrintHelper {
     await printMemoReport(memos);
   }
 
-  static Future<void> printMapWithMemos(List<Memo> memos, String? mapImagePath) async {
-    await printMemoReport(memos, mapImagePath: mapImagePath);
+  static Future<void> printMapWithMemos(
+      List<Memo> memos, String? mapImagePath) async {
+    // 地図画像のみを印刷
+    await printMapImage(mapImagePath);
   }
 
-  static Future<void> savePdfReport(List<Memo> memos, {String? mapImagePath}) async {
+  static Future<void> savePdfReport(List<Memo> memos,
+      {String? mapImagePath}) async {
     try {
       final pdf = pw.Document();
-      final font = pw.Font.helvetica();
-      final boldFont = pw.Font.helveticaBold();
+      // 日本語フォントを取得
+      final font = await _getJapaneseFont();
+      final boldFont = await _getJapaneseBoldFont();
 
       // 地図付きページを追加
       if (mapImagePath != null && File(mapImagePath).existsSync()) {
         final mapImageBytes = await File(mapImagePath).readAsBytes();
-        
+
         pdf.addPage(
           pw.Page(
             pageFormat: PdfPageFormat.a4,
@@ -210,10 +530,7 @@ class PrintHelper {
                 children: [
                   pw.Text(
                     'フィールドワーク記録地図',
-                    style: pw.TextStyle(
-                      font: boldFont,
-                      fontSize: 18,
-                    ),
+                    style: _createTextStyle(boldFont, 18),
                   ),
                   pw.SizedBox(height: 20),
                   pw.Expanded(
@@ -231,11 +548,11 @@ class PrintHelper {
                   pw.SizedBox(height: 10),
                   pw.Text(
                     '記録数: ${memos.length}件',
-                    style: pw.TextStyle(font: font, fontSize: 12),
+                    style: _createTextStyle(font, 12),
                   ),
                   pw.Text(
                     '印刷日時: ${DateTime.now().toString().substring(0, 19)}',
-                    style: pw.TextStyle(font: font, fontSize: 12),
+                    style: _createTextStyle(font, 12),
                   ),
                 ],
               );
@@ -254,10 +571,7 @@ class PrintHelper {
               return [
                 pw.Text(
                   '記録一覧',
-                  style: pw.TextStyle(
-                    font: boldFont,
-                    fontSize: 18,
-                  ),
+                  style: _createTextStyle(boldFont, 18),
                 ),
                 pw.SizedBox(height: 20),
                 ...memos.map((memo) => _buildMemoItem(memo, font, boldFont)),
@@ -269,13 +583,14 @@ class PrintHelper {
 
       // ファイルを保存
       final output = await getApplicationDocumentsDirectory();
-      final file = File('${output.path}/fieldwork_report_${DateTime.now().millisecondsSinceEpoch}.pdf');
+      final file = File(
+          '${output.path}/fieldwork_report_${DateTime.now().millisecondsSinceEpoch}.pdf');
       await file.writeAsBytes(await pdf.save());
-      
+
       // 成功メッセージを返す（呼び出し元で表示）
       return;
     } catch (e) {
       throw Exception('PDFの保存に失敗しました: $e');
     }
   }
-} 
+}
