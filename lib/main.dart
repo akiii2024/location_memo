@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:location_memo/screens/main_screen.dart';
+import 'package:location_memo/screens/splash_screen.dart';
 import 'package:location_memo/utils/theme_provider.dart';
 
 void main() {
@@ -22,7 +23,7 @@ class MyApp extends StatelessWidget {
             theme: ThemeProvider.lightTheme,
             darkTheme: ThemeProvider.darkTheme,
             themeMode: themeProvider.themeMode,
-            home: const MainScreen(),
+            home: const SplashScreen(),
           );
         },
       ),

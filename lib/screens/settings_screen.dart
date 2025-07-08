@@ -24,16 +24,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           Card(
             child: ListTile(
-              leading: const Icon(Icons.notifications),
-              title: const Text('通知'),
-              subtitle: const Text('アプリの通知を有効/無効にします'),
+              leading: const Icon(Icons.notifications, color: Colors.grey),
+              title:
+                  const Text('通知（未実装）', style: TextStyle(color: Colors.grey)),
+              subtitle: const Text('アプリの通知を有効/無効にします',
+                  style: TextStyle(color: Colors.grey)),
               trailing: Switch(
                 value: _notifications,
-                onChanged: (value) {
-                  setState(() {
-                    _notifications = value;
-                  });
-                },
+                onChanged: null, // nullにすることでスイッチを無効化
               ),
             ),
           ),
@@ -69,7 +67,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   builder: (context) => AlertDialog(
                     title: const Text('バージョン情報'),
                     content: const Text(
-                        'Location Memo App\nVersion 0.1.0-alpha\nDeveloped by Akihisa Iwata'),
+                        'Location Memo App\nVersion 0.1.1-alpha\nDeveloped by Akihisa Iwata'),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.of(context).pop(),
