@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'map_list_screen.dart';
+import '../utils/theme_provider.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -10,7 +12,6 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _notifications = true;
-  bool _darkMode = false;
 
   @override
   Widget build(BuildContext context) {
@@ -37,20 +38,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.dark_mode),
-              title: const Text('ダークモード'),
-              subtitle: const Text('ダークテーマを有効/無効にします'),
-              trailing: Switch(
-                value: _darkMode,
-                onChanged: (value) {
-                  setState(() {
-                    _darkMode = value;
-                  });
-                },
-              ),
-            ),
+          Consumer<ThemeProvider>(
+            builder: (context, themeProvider, child) {
+              return Card(
+                child: ListTile(
+                  leading: const Icon(Icons.dark_mode),
+                  title: const Text('ダークモード（Beta）'),
+                  subtitle:
+                      const Text('ダークテーマを有効/無効にします（実験中のため色合いがおかしくなることがあります。）'),
+                  trailing: Switch(
+                    value: themeProvider.isDarkMode,
+                    onChanged: (value) {
+                      themeProvider.setDarkMode(value);
+                    },
+                  ),
+                ),
+              );
+            },
           ),
           const SizedBox(height: 8),
           Card(
@@ -64,7 +68,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   context: context,
                   builder: (context) => AlertDialog(
                     title: const Text('バージョン情報'),
-                    content: const Text('Location Memo App\nVersion 1.0.0'),
+                    content: const Text(
+                        'Location Memo App\nVersion 0.1.0-alpha\nDeveloped by Akihisa Iwata'),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.of(context).pop(),

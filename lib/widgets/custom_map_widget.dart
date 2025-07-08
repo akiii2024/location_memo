@@ -37,6 +37,7 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
   double _actualDisplayHeight = 600.0;
   double _offsetX = 0.0;
   double _offsetY = 0.0;
+  double _currentScale = 1.0; // 現在のスケール値を追跡
 
   @override
   void initState() {
@@ -47,6 +48,61 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
     } else {
       _loadSavedMapImage();
     }
+
+    // TransformationControllerのリスナーを追加してスケール変更を監視
+    _transformationController.addListener(_onTransformChanged);
+  }
+
+  // スケール変更時のコールバック
+  void _onTransformChanged() {
+    final Matrix4 matrix = _transformationController.value;
+    final double newScale = matrix.getMaxScaleOnAxis();
+    print('スケール変更: $_currentScale -> $newScale'); // デバッグ用
+    if ((newScale - _currentScale).abs() > 0.01) {
+      // より小さな変化も検知
+      setState(() {
+        _currentScale = newScale;
+      });
+      print('ピンサイズ: ${_getPinSize()}'); // デバッグ用
+    }
+  }
+
+  // ズーム倍率に応じたピンサイズを計算
+  double _getPinSize() {
+    // ベースサイズ40px、最小20px、最大80px
+    const double baseSize = 40.0;
+    const double minSize = 20.0;
+    const double maxSize = 80.0;
+
+    // スケールが小さいほど（ズームアウト）ピンを大きく表示
+    // スケールが大きいほど（ズームイン）ピンを小さく表示
+    // スケール値を逆数として使用して、よりダイナミックな変化を実現
+    final double scaleFactor = 1.0 / _currentScale;
+    final double adjustedSize = baseSize * scaleFactor;
+    final double clampedSize = adjustedSize.clamp(minSize, maxSize);
+
+    print(
+        'ピンサイズ計算: スケール=$_currentScale, 係数=$scaleFactor, 調整サイズ=$adjustedSize, 最終サイズ=$clampedSize'); // デバッグ用
+
+    return clampedSize;
+  }
+
+  // ズーム倍率に応じたアイコンサイズを計算
+  double _getIconSize() {
+    final double pinSize = _getPinSize();
+    return (pinSize * 0.4).clamp(12.0, 24.0);
+  }
+
+  // ズーム倍率に応じたピン番号コンテナサイズを計算
+  double _getPinNumberSize() {
+    final double pinSize = _getPinSize();
+    return (pinSize * 0.4).clamp(12.0, 20.0);
+  }
+
+  // ズーム倍率に応じたピン番号フォントサイズを計算
+  double _getPinNumberFontSize() {
+    final double pinNumberSize = _getPinNumberSize();
+    return (pinNumberSize * 0.6).clamp(8.0, 12.0);
   }
 
   Future<void> _loadSavedMapImage() async {
@@ -170,6 +226,18 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
       boundaryMargin: const EdgeInsets.all(20.0),
       minScale: 0.1,
       maxScale: 5.0,
+      onInteractionUpdate: (ScaleUpdateDetails details) {
+        // スケール値の更新を直接監視
+        final Matrix4 matrix = _transformationController.value;
+        final double newScale = matrix.getMaxScaleOnAxis();
+        print('インタラクション更新: スケール = $newScale'); // デバッグ用
+        if ((newScale - _currentScale).abs() > 0.01) {
+          setState(() {
+            _currentScale = newScale;
+          });
+          print('ピンサイズ更新: ${_getPinSize()}'); // デバッグ用
+        }
+      },
       child: GestureDetector(
         onTapDown: (details) {
           // タップ位置を地図座標に変換
@@ -259,16 +327,23 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
                           final double pinY =
                               memo.longitude! * _actualDisplayHeight + _offsetY;
 
+                          // ズーム倍率に応じたサイズを計算
+                          final double pinSize = _getPinSize();
+                          final double iconSize = _getIconSize();
+                          final double pinNumberSize = _getPinNumberSize();
+                          final double pinNumberFontSize =
+                              _getPinNumberFontSize();
+
                           return Positioned(
-                            left: pinX - 20,
-                            top: pinY - 40,
+                            left: pinX - pinSize / 2,
+                            top: pinY - pinSize,
                             child: GestureDetector(
                               onTap: () => widget.onMemoTap(memo),
                               onLongPress: () =>
                                   _showPinNumberDialog(memo), // 長押しで番号編集
                               child: Container(
-                                width: 40,
-                                height: 40,
+                                width: pinSize,
+                                height: pinSize,
                                 decoration: BoxDecoration(
                                   color: _getCategoryColor(memo.category),
                                   shape: BoxShape.circle,
@@ -289,7 +364,7 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
                                       child: Icon(
                                         _getCategoryIcon(memo.category),
                                         color: Colors.white,
-                                        size: 16,
+                                        size: iconSize,
                                       ),
                                     ),
                                     // ピン番号
@@ -298,8 +373,8 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
                                         top: 0,
                                         right: 0,
                                         child: Container(
-                                          width: 16,
-                                          height: 16,
+                                          width: pinNumberSize,
+                                          height: pinNumberSize,
                                           decoration: BoxDecoration(
                                             color: Colors.red,
                                             shape: BoxShape.circle,
@@ -309,9 +384,9 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
                                           child: Center(
                                             child: Text(
                                               '${memo.pinNumber}',
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                 color: Colors.white,
-                                                fontSize: 10,
+                                                fontSize: pinNumberFontSize,
                                                 fontWeight: FontWeight.bold,
                                               ),
                                             ),
@@ -449,6 +524,58 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
     );
   }
 
+  // ズームイン機能
+  void _zoomIn() {
+    final newScale = (_currentScale * 1.2).clamp(0.1, 5.0);
+    _setScale(newScale);
+  }
+
+  // ズームアウト機能
+  void _zoomOut() {
+    final newScale = (_currentScale / 1.2).clamp(0.1, 5.0);
+    _setScale(newScale);
+  }
+
+  // スケールを設定する機能（中央基準でズーム）
+  void _setScale(double scale) {
+    final double scaleChange = scale / _currentScale;
+
+    // ビューポートのサイズを取得
+    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+
+    final Size viewportSize = renderBox.size;
+    final double viewportCenterX = viewportSize.width / 2;
+    final double viewportCenterY = viewportSize.height / 2;
+
+    // 現在の変換行列を取得
+    final Matrix4 currentMatrix = _transformationController.value;
+
+    // ビューポート中央を基準にスケール変更を適用
+    final Matrix4 newMatrix = Matrix4.identity()
+      ..translate(viewportCenterX, viewportCenterY)
+      ..scale(scaleChange)
+      ..translate(-viewportCenterX, -viewportCenterY)
+      ..multiply(currentMatrix);
+
+    _transformationController.value = newMatrix;
+
+    // スケール値を更新してピンサイズを再計算
+    setState(() {
+      _currentScale = scale;
+    });
+    print('手動スケール設定: $scale, ピンサイズ: ${_getPinSize()}'); // デバッグ用
+  }
+
+  // リセット機能
+  void _resetTransform() {
+    _transformationController.value = Matrix4.identity();
+    setState(() {
+      _currentScale = 1.0;
+    });
+    print('変換リセット: スケール = 1.0, ピンサイズ: ${_getPinSize()}'); // デバッグ用
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -467,38 +594,30 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
                   style: const TextStyle(fontSize: 12),
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.upload_file),
-                onPressed: _selectMapImage,
-                tooltip: '地図ファイルを選択',
-              ),
-              if (_mapImagePath != null)
-                IconButton(
-                  icon: const Icon(Icons.clear),
-                  onPressed: _clearMapImage,
-                  tooltip: '地図をクリア',
-                ),
+              //IconButton(
+              //  icon: const Icon(Icons.upload_file),
+              //  onPressed: _selectMapImage,
+              //  tooltip: '地図ファイルを選択',
+              //),
+              //if (_mapImagePath != null)
+              //  IconButton(
+              //    icon: const Icon(Icons.clear),
+              //    onPressed: _clearMapImage,
+              //    tooltip: '地図をクリア',
+              //  ),
               IconButton(
                 icon: const Icon(Icons.zoom_in),
-                onPressed: () {
-                  final Matrix4 matrix = _transformationController.value;
-                  _transformationController.value = matrix..scale(1.2);
-                },
+                onPressed: _zoomIn,
                 tooltip: '拡大',
               ),
               IconButton(
                 icon: const Icon(Icons.zoom_out),
-                onPressed: () {
-                  final Matrix4 matrix = _transformationController.value;
-                  _transformationController.value = matrix..scale(0.8);
-                },
+                onPressed: _zoomOut,
                 tooltip: '縮小',
               ),
               IconButton(
                 icon: const Icon(Icons.center_focus_strong),
-                onPressed: () {
-                  _transformationController.value = Matrix4.identity();
-                },
+                onPressed: _resetTransform,
                 tooltip: 'リセット',
               ),
             ],
@@ -527,6 +646,7 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
 
   @override
   void dispose() {
+    _transformationController.removeListener(_onTransformChanged);
     _transformationController.dispose();
     super.dispose();
   }

@@ -276,6 +276,17 @@ CREATE TABLE maps (
     );
   }
 
+  Future<int> updateMap(MapInfo mapInfo) async {
+    final db = await instance.database;
+
+    return db.update(
+      'maps',
+      mapInfo.toMap(),
+      where: 'id = ?',
+      whereArgs: [mapInfo.id],
+    );
+  }
+
   Future<int> delete(int id) async {
     final db = await instance.database;
 

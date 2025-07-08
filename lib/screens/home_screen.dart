@@ -114,6 +114,70 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _renameMap(MapInfo mapInfo) async {
+    final TextEditingController controller =
+        TextEditingController(text: mapInfo.title);
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('地図の名称を変更'),
+          content: TextField(
+            controller: controller,
+            decoration: const InputDecoration(
+              labelText: '地図の名称',
+              border: OutlineInputBorder(),
+            ),
+            autofocus: true,
+            onSubmitted: (value) {
+              if (value.trim().isNotEmpty) {
+                Navigator.of(context).pop(value.trim());
+              }
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('キャンセル'),
+            ),
+            TextButton(
+              onPressed: () {
+                final newTitle = controller.text.trim();
+                if (newTitle.isNotEmpty) {
+                  Navigator.of(context).pop(newTitle);
+                }
+              },
+              child: const Text('変更'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result != null && result.isNotEmpty && result != mapInfo.title) {
+      try {
+        final updatedMap = MapInfo(
+          id: mapInfo.id,
+          title: result,
+          imagePath: mapInfo.imagePath,
+        );
+
+        await DatabaseHelper.instance.updateMap(updatedMap);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('地図の名称を「$result」に変更しました')),
+        );
+
+        _loadMaps(); // 地図リストを再読み込み
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('地図の名称変更に失敗しました: $e')),
+        );
+      }
+    }
+  }
+
   void _showMapOptions(MapInfo mapInfo) {
     showModalBottomSheet(
       context: context,
@@ -129,6 +193,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 onTap: () {
                   Navigator.pop(context);
                   _openMap(mapInfo);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.edit),
+                title: const Text('名称を変更'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  await _renameMap(mapInfo);
                 },
               ),
               ListTile(
@@ -213,98 +285,81 @@ class _HomeScreenState extends State<HomeScreen> {
       itemCount: _maps.length,
       itemBuilder: (context, index) {
         final map = _maps[index];
-        return Dismissible(
-          key: Key(map.id.toString()),
-          direction: DismissDirection.endToStart,
-          background: Container(
-            alignment: Alignment.centerRight,
-            padding: const EdgeInsets.only(right: 20.0),
-            color: Colors.red,
-            child: const Icon(
-              Icons.delete,
-              color: Colors.white,
-            ),
-          ),
-          confirmDismiss: (direction) async {
-            await _deleteMap(map);
-            return true;
-          },
-          child: Card(
-            margin: const EdgeInsets.only(bottom: 12.0),
-            child: InkWell(
-              onTap: () => _openMap(map),
-              onLongPress: () => _showMapOptions(map),
-              borderRadius: BorderRadius.circular(8.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (map.imagePath != null)
-                    Container(
-                      width: double.infinity,
-                      height: 150,
-                      decoration: BoxDecoration(
-                        borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(8.0),
-                        ),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(8.0),
-                        ),
-                        child: Image.file(
-                          File(map.imagePath!),
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              color: Colors.grey.shade200,
-                              child: const Center(
-                                child: Icon(
-                                  Icons.broken_image,
-                                  size: 48,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12.0),
+          child: InkWell(
+            onTap: () => _openMap(map),
+            onLongPress: () => _showMapOptions(map),
+            borderRadius: BorderRadius.circular(8.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (map.imagePath != null)
+                  Container(
+                    width: double.infinity,
+                    height: 150,
+                    decoration: BoxDecoration(
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(8.0),
                       ),
                     ),
-                  Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                map.title,
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                    child: ClipRRect(
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(8.0),
+                      ),
+                      child: Image.file(
+                        File(map.imagePath!),
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            color: Colors.grey.shade200,
+                            child: const Center(
+                              child: Icon(
+                                Icons.broken_image,
+                                size: 48,
+                                color: Colors.grey,
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'タップして地図を開く',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey.shade600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Icon(
-                          Icons.arrow_forward_ios,
-                          size: 16,
-                          color: Colors.grey.shade400,
-                        ),
-                      ],
+                            ),
+                          );
+                        },
+                      ),
                     ),
                   ),
-                ],
-              ),
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              map.title,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'タップして地図を開く',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(
+                        Icons.arrow_forward_ios,
+                        size: 16,
+                        color: Colors.grey.shade400,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         );
