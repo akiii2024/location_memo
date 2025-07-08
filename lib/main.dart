@@ -3,8 +3,11 @@ import 'package:provider/provider.dart';
 import 'package:location_memo/screens/main_screen.dart';
 import 'package:location_memo/screens/splash_screen.dart';
 import 'package:location_memo/utils/theme_provider.dart';
+import 'package:location_memo/utils/app_info.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await AppInfo.init();
   runApp(const MyApp());
 }
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:location_memo/screens/main_screen.dart';
+import 'package:location_memo/utils/app_info.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({Key? key}) : super(key: key);
@@ -108,7 +109,7 @@ class _SplashScreenState extends State<SplashScreen>
               ),
               const SizedBox(height: 10),
               Text(
-                'Version 0.1.0-alpha',
+                AppInfo.version,
                 style: TextStyle(
                   fontSize: 12,
                   color: Theme.of(context).textTheme.bodyMedium?.color,

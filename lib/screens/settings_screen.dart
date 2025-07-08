@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'map_list_screen.dart';
 import '../utils/theme_provider.dart';
+import '../utils/app_info.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -66,8 +67,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   context: context,
                   builder: (context) => AlertDialog(
                     title: const Text('バージョン情報'),
-                    content: const Text(
-                        'Location Memo App\nVersion 0.1.1-alpha\nDeveloped by Akihisa Iwata'),
+                    content: Text(
+                        '${AppInfo.appName}\n${AppInfo.version}\nDeveloped by Akihisa Iwata'),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.of(context).pop(),
