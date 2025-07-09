@@ -137,6 +137,8 @@ user_data/
 **/ios/Runner/GoogleService-Info.plist
 **/lib/config/api_keys.dart
 secrets.dart
+**/lib/utils/ai_service.dart
+**/lib/utils/api_config.dart
 
 # Firebase configuration
 firebase_options.dart

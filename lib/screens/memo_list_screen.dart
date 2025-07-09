@@ -6,7 +6,10 @@ import 'memo_detail_screen.dart';
 import 'add_memo_screen.dart';
 
 class MemoListScreen extends StatefulWidget {
-  const MemoListScreen({Key? key}) : super(key: key);
+  final List<Memo>? memos; // オプショナルなメモリストを追加
+  final String? mapTitle; // オプショナルなマップタイトルを追加
+
+  const MemoListScreen({Key? key, this.memos, this.mapTitle}) : super(key: key);
 
   @override
   _MemoListScreenState createState() => _MemoListScreenState();
@@ -35,7 +38,16 @@ class _MemoListScreenState extends State<MemoListScreen> {
   }
 
   Future<void> _loadMemos() async {
-    final memos = await DatabaseHelper.instance.readAllMemosWithMapTitle();
+    List<Memo> memos;
+
+    if (widget.memos != null) {
+      // メモリストが渡された場合はそれを使用
+      memos = widget.memos!;
+    } else {
+      // メモリストが渡されなかった場合は全てのメモを読み込み
+      memos = await DatabaseHelper.instance.readAllMemosWithMapTitle();
+    }
+
     setState(() {
       _memos = memos;
       _applyFilter();
@@ -98,7 +110,8 @@ class _MemoListScreenState extends State<MemoListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('記録一覧'),
+        title:
+            Text(widget.mapTitle != null ? '${widget.mapTitle}の記録一覧' : '記録一覧'),
         actions: [
           // 印刷ボタン
           IconButton(

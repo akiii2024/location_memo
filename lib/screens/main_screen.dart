@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:location_memo/screens/home_screen.dart';
 import 'package:location_memo/screens/search_screen.dart';
+import 'package:location_memo/screens/pin_list_screen.dart';
 import 'package:location_memo/screens/settings_screen.dart';
 
 class MainScreen extends StatefulWidget {
@@ -16,6 +17,7 @@ class _MainScreenState extends State<MainScreen> {
   final List<Widget> _screens = [
     const HomeScreen(),
     const SearchScreen(),
+    const PinListScreen(),
     const SettingsScreen(),
   ];
 
@@ -24,6 +26,7 @@ class _MainScreenState extends State<MainScreen> {
     return Scaffold(
       body: _screens[_currentIndex],
       bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
         currentIndex: _currentIndex,
         onTap: (index) {
           setState(() {
@@ -38,6 +41,10 @@ class _MainScreenState extends State<MainScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.search),
             label: '検索',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.push_pin),
+            label: 'ピン一覧',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.settings),

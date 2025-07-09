@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
@@ -9,10 +10,52 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'dart:convert'; // Base64デコード用
 
 import '../models/memo.dart';
 
 class PrintHelper {
+  // Web版対応: 画像パスが有効かどうかをチェック
+  static bool _isValidImagePath(String? imagePath) {
+    if (imagePath == null || imagePath.isEmpty) return false;
+
+    if (kIsWeb) {
+      // Web版: Base64データURL形式またはBase64文字列かをチェック
+      return imagePath.startsWith('data:image') ||
+          (imagePath.length > 100 && _isBase64(imagePath));
+    } else {
+      // モバイル版: ファイルの存在をチェック
+      return File(imagePath).existsSync();
+    }
+  }
+
+  // Base64文字列かどうかをチェック
+  static bool _isBase64(String str) {
+    try {
+      return base64.decode(str).isNotEmpty;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Web版対応: 画像データを読み込み
+  static Future<Uint8List> _loadImageBytes(String? imagePath) async {
+    if (imagePath == null) throw Exception('画像パスがありません');
+
+    if (kIsWeb) {
+      // Web版: Base64データから読み込み
+      if (imagePath.startsWith('data:image')) {
+        final base64Data = imagePath.split(',')[1];
+        return base64.decode(base64Data);
+      } else {
+        return base64.decode(imagePath);
+      }
+    } else {
+      // モバイル版: ファイルから読み込み
+      return File(imagePath).readAsBytes();
+    }
+  }
+
   // 日本語フォントを取得するヘルパーメソッド
   static Future<pw.Font> _getJapaneseFont() async {
     try {
@@ -66,13 +109,13 @@ class PrintHelper {
 
   // 地図画像とピンを合成するヘルパー関数
   static Future<Uint8List> _createMapWithPins(
-    String mapImagePath,
+    String? mapImagePath,
     List<Memo> memos,
     double mapWidth,
     double mapHeight,
   ) async {
     // 地図画像を読み込み
-    final mapImageBytes = await File(mapImagePath).readAsBytes();
+    final mapImageBytes = await _loadImageBytes(mapImagePath);
     final mapImage = await decodeImageFromList(mapImageBytes);
 
     // キャンバスを作成
@@ -215,7 +258,7 @@ class PrintHelper {
     double mapWidth,
     double mapHeight,
   ) async {
-    if (mapImagePath == null || !File(mapImagePath).existsSync()) {
+    if (!_isValidImagePath(mapImagePath)) {
       throw Exception('地図画像が見つかりません');
     }
 
@@ -279,7 +322,7 @@ class PrintHelper {
   }
 
   static Future<void> printMapImage(String? mapImagePath) async {
-    if (mapImagePath == null || !File(mapImagePath).existsSync()) {
+    if (!_isValidImagePath(mapImagePath)) {
       throw Exception('地図画像が見つかりません');
     }
 
@@ -288,7 +331,7 @@ class PrintHelper {
     final boldFont = await _getJapaneseBoldFont();
 
     final pdf = pw.Document();
-    final mapImageBytes = await File(mapImagePath).readAsBytes();
+    final mapImageBytes = await _loadImageBytes(mapImagePath);
 
     pdf.addPage(
       pw.Page(
@@ -340,8 +383,8 @@ class PrintHelper {
     final boldFont = await _getJapaneseBoldFont();
 
     // 地図付きページを追加
-    if (mapImagePath != null && File(mapImagePath).existsSync()) {
-      final mapImageBytes = await File(mapImagePath).readAsBytes();
+    if (_isValidImagePath(mapImagePath)) {
+      final mapImageBytes = await _loadImageBytes(mapImagePath);
 
       pdf.addPage(
         pw.Page(
@@ -517,8 +560,8 @@ class PrintHelper {
       final boldFont = await _getJapaneseBoldFont();
 
       // 地図付きページを追加
-      if (mapImagePath != null && File(mapImagePath).existsSync()) {
-        final mapImageBytes = await File(mapImagePath).readAsBytes();
+      if (_isValidImagePath(mapImagePath)) {
+        final mapImageBytes = await _loadImageBytes(mapImagePath);
 
         pdf.addPage(
           pw.Page(
@@ -582,10 +625,18 @@ class PrintHelper {
       }
 
       // ファイルを保存
-      final output = await getApplicationDocumentsDirectory();
-      final file = File(
-          '${output.path}/fieldwork_report_${DateTime.now().millisecondsSinceEpoch}.pdf');
-      await file.writeAsBytes(await pdf.save());
+      if (kIsWeb) {
+        // Web版: PDFを直接ダウンロード
+        await Printing.layoutPdf(
+          onLayout: (PdfPageFormat format) async => pdf.save(),
+        );
+      } else {
+        // モバイル版: ファイルシステムに保存
+        final output = await getApplicationDocumentsDirectory();
+        final file = File(
+            '${output.path}/fieldwork_report_${DateTime.now().millisecondsSinceEpoch}.pdf');
+        await file.writeAsBytes(await pdf.save());
+      }
 
       // 成功メッセージを返す（呼び出し元で表示）
       return;

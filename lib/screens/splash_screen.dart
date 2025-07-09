@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:location_memo/screens/main_screen.dart';
+import 'package:location_memo/screens/tutorial_screen.dart';
 import 'package:location_memo/utils/app_info.dart';
+import 'package:location_memo/utils/tutorial_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({Key? key}) : super(key: key);
@@ -31,11 +33,15 @@ class _SplashScreenState extends State<SplashScreen>
 
     _animationController.forward();
 
-    // 3秒後にメイン画面に遷移
-    Future.delayed(const Duration(seconds: 3), () {
+    // 3秒後に初回起動判定を行って画面遷移
+    Future.delayed(const Duration(seconds: 3), () async {
       if (mounted) {
+        final isFirstLaunch = await TutorialService.isFirstLaunch();
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const MainScreen()),
+          MaterialPageRoute(
+            builder: (context) =>
+                isFirstLaunch ? const TutorialScreen() : const MainScreen(),
+          ),
         );
       }
     });

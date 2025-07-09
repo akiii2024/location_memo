@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:convert';
 import '../models/map_info.dart';
 import '../utils/database_helper.dart';
 
@@ -15,6 +18,7 @@ class AddMapScreen extends StatefulWidget {
 class _AddMapScreenState extends State<AddMapScreen> {
   final TextEditingController _titleController = TextEditingController();
   File? _selectedImage;
+  Uint8List? _selectedImageBytes;
   bool _isLoading = false;
   bool _isSaving = false;
 
@@ -33,9 +37,16 @@ class _AddMapScreenState extends State<AddMapScreen> {
       );
 
       if (image != null) {
-        setState(() {
-          _selectedImage = File(image.path);
-        });
+        if (kIsWeb) {
+          final bytes = await image.readAsBytes();
+          setState(() {
+            _selectedImageBytes = bytes;
+          });
+        } else {
+          setState(() {
+            _selectedImage = File(image.path);
+          });
+        }
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -63,9 +74,16 @@ class _AddMapScreenState extends State<AddMapScreen> {
       );
 
       if (image != null) {
-        setState(() {
-          _selectedImage = File(image.path);
-        });
+        if (kIsWeb) {
+          final bytes = await image.readAsBytes();
+          setState(() {
+            _selectedImageBytes = bytes;
+          });
+        } else {
+          setState(() {
+            _selectedImage = File(image.path);
+          });
+        }
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -86,7 +104,7 @@ class _AddMapScreenState extends State<AddMapScreen> {
       return;
     }
 
-    if (_selectedImage == null) {
+    if ((kIsWeb ? _selectedImageBytes == null : _selectedImage == null)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('地図画像を選択してください')),
       );
@@ -98,16 +116,28 @@ class _AddMapScreenState extends State<AddMapScreen> {
     });
 
     try {
-      // 画像をアプリのドキュメントディレクトリにコピー
-      final directory = await getApplicationDocumentsDirectory();
-      final fileName = 'map_${DateTime.now().millisecondsSinceEpoch}.png';
-      final savedImage =
-          await _selectedImage!.copy('${directory.path}/$fileName');
+      String? imagePath;
 
-      // データベースに地図情報を保存
+      if (kIsWeb) {
+        // Web環境: Base64エンコードされた画像データを保存
+        if (_selectedImageBytes != null) {
+          final base64Image = base64Encode(_selectedImageBytes!);
+          imagePath = 'data:image/png;base64,$base64Image';
+        }
+      } else {
+        // モバイル/デスクトップ環境: ファイルとして保存
+        if (_selectedImage != null) {
+          final directory = await getApplicationDocumentsDirectory();
+          final fileName = 'map_${DateTime.now().millisecondsSinceEpoch}.png';
+          final savedImage =
+              await _selectedImage!.copy('${directory.path}/$fileName');
+          imagePath = savedImage.path;
+        }
+      }
+
       final mapInfo = MapInfo(
         title: _titleController.text.trim(),
-        imagePath: savedImage.path,
+        imagePath: imagePath,
       );
 
       await DatabaseHelper.instance.createMap(mapInfo);
@@ -182,7 +212,10 @@ class _AddMapScreenState extends State<AddMapScreen> {
             ),
             const SizedBox(height: 12),
 
-            if (_selectedImage != null) ...[
+            // プレビュー表示条件の修正
+            if ((kIsWeb
+                ? _selectedImageBytes != null
+                : _selectedImage != null)) ...[
               Container(
                 width: double.infinity,
                 height: 200,
@@ -192,10 +225,15 @@ class _AddMapScreenState extends State<AddMapScreen> {
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: Image.file(
-                    _selectedImage!,
-                    fit: BoxFit.cover,
-                  ),
+                  child: kIsWeb
+                      ? Image.memory(
+                          _selectedImageBytes!,
+                          fit: BoxFit.cover,
+                        )
+                      : Image.file(
+                          _selectedImage!,
+                          fit: BoxFit.cover,
+                        ),
                 ),
               ),
               const SizedBox(height: 12),

@@ -2,12 +2,31 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/memo.dart';
 import '../models/map_info.dart';
+import 'package:flutter/foundation.dart';
+import 'package:hive/hive.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
+  static Box<MapInfo>? _mapBox;
+  static Box<Memo>? _memoBox;
 
   DatabaseHelper._init();
+
+  Future<void> init() async {
+    if (kIsWeb) {
+      await Hive.initFlutter();
+      if (!Hive.isAdapterRegistered(0)) {
+        Hive.registerAdapter(MapInfoAdapter());
+      }
+      if (!Hive.isAdapterRegistered(1)) {
+        Hive.registerAdapter(MemoAdapter());
+      }
+      _mapBox = await Hive.openBox<MapInfo>('maps');
+      _memoBox = await Hive.openBox<Memo>('memos');
+    }
+  }
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -20,7 +39,7 @@ class DatabaseHelper {
     final path = join(dbPath, filePath);
 
     return await openDatabase(path,
-        version: 5, onCreate: _createDB, onUpgrade: _upgradeDB);
+        version: 6, onCreate: _createDB, onUpgrade: _upgradeDB);
   }
 
   Future _createDB(Database db, int version) async {
@@ -43,7 +62,8 @@ CREATE TABLE memos (
   category $textNullType,
   notes $textNullType,
   mapId $intType,
-  pinNumber $intType
+  pinNumber $intType,
+  audioPath $textNullType
 )
 ''');
 
@@ -76,158 +96,352 @@ CREATE TABLE maps (
     if (oldVersion < 4) {
       await db.execute('ALTER TABLE maps ADD COLUMN imagePath TEXT');
     }
-    // pinNumberカラムは_createDBで既に作成されているため、ここでは追加しない
+    if (oldVersion < 5) {
+      await db.execute('ALTER TABLE memos ADD COLUMN pinNumber INTEGER');
+    }
+    if (oldVersion < 6) {
+      await db.execute('ALTER TABLE memos ADD COLUMN audioPath TEXT');
+    }
   }
 
   Future<Memo> create(Memo memo) async {
-    final db = await instance.database;
-    final id = await db.insert('memos', memo.toMap());
-    return memo..id = id;
+    if (kIsWeb) {
+      await init();
+      final key = await _memoBox!.add(memo);
+      return Memo(
+        id: key,
+        title: memo.title,
+        content: memo.content,
+        latitude: memo.latitude,
+        longitude: memo.longitude,
+        discoveryTime: memo.discoveryTime,
+        discoverer: memo.discoverer,
+        specimenNumber: memo.specimenNumber,
+        category: memo.category,
+        notes: memo.notes,
+        pinNumber: memo.pinNumber,
+        mapId: memo.mapId,
+        audioPath: memo.audioPath,
+      );
+    } else {
+      final db = await instance.database;
+      final id = await db.insert('memos', memo.toMap());
+      return memo..id = id;
+    }
   }
 
   Future<MapInfo> createMap(MapInfo mapInfo) async {
-    final db = await instance.database;
-    final id = await db.insert('maps', mapInfo.toMap());
-    return MapInfo(id: id, title: mapInfo.title, imagePath: mapInfo.imagePath);
+    if (kIsWeb) {
+      await init();
+      final key = await _mapBox!.add(mapInfo);
+      return MapInfo(
+          id: key, title: mapInfo.title, imagePath: mapInfo.imagePath);
+    } else {
+      final db = await instance.database;
+      final id = await db.insert('maps', mapInfo.toMap());
+      return MapInfo(
+          id: id, title: mapInfo.title, imagePath: mapInfo.imagePath);
+    }
   }
 
   Future<Memo> readMemo(int id) async {
-    final db = await instance.database;
-    final maps = await db.query(
-      'memos',
-      columns: [
-        'id',
-        'title',
-        'content',
-        'latitude',
-        'longitude',
-        'discoveryTime',
-        'discoverer',
-        'specimenNumber',
-        'category',
-        'notes',
-        'mapId',
-        'pinNumber'
-      ],
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-
-    if (maps.isNotEmpty) {
-      return Memo.fromMap(maps.first);
+    if (kIsWeb) {
+      await init();
+      final memo = _memoBox!.get(id);
+      if (memo != null) {
+        return memo;
+      } else {
+        throw Exception('ID $id not found');
+      }
     } else {
-      throw Exception('ID $id not found');
+      final db = await instance.database;
+      final maps = await db.query(
+        'memos',
+        columns: [
+          'id',
+          'title',
+          'content',
+          'latitude',
+          'longitude',
+          'discoveryTime',
+          'discoverer',
+          'specimenNumber',
+          'category',
+          'notes',
+          'mapId',
+          'pinNumber',
+          'audioPath'
+        ],
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+
+      if (maps.isNotEmpty) {
+        return Memo.fromMap(maps.first);
+      } else {
+        throw Exception('ID $id not found');
+      }
     }
   }
 
   Future<List<Memo>> readAllMemos() async {
-    final db = await instance.database;
-    const orderBy = 'id ASC';
-    final result = await db.query('memos', orderBy: orderBy);
+    if (kIsWeb) {
+      await init();
+      return _memoBox!.values.toList();
+    } else {
+      final db = await instance.database;
+      const orderBy = 'id ASC';
+      final result = await db.query('memos', orderBy: orderBy);
 
-    return result.map((json) => Memo.fromMap(json)).toList();
+      return result.map((json) => Memo.fromMap(json)).toList();
+    }
   }
 
   // 地図の名前を含むメモ一覧を取得
   Future<List<Memo>> readAllMemosWithMapTitle() async {
-    final db = await instance.database;
-    final result = await db.rawQuery('''
-      SELECT m.*, mp.title as mapTitle 
-      FROM memos m 
-      LEFT JOIN maps mp ON m.mapId = mp.id 
-      ORDER BY m.id ASC
-    ''');
+    if (kIsWeb) {
+      await init();
+      final memos = _memoBox!.values.toList();
+      final maps = _mapBox!.values.toList();
 
-    return result.map((json) => Memo.fromMap(json)).toList();
+      // 地図タイトルを設定
+      for (var memo in memos) {
+        if (memo.mapId != null) {
+          final map = maps.firstWhere(
+            (m) => m.id == memo.mapId,
+            orElse: () => MapInfo(title: '不明な地図'),
+          );
+          memo.mapTitle = map.title;
+        }
+      }
+
+      return memos;
+    } else {
+      final db = await instance.database;
+      final result = await db.rawQuery('''
+        SELECT m.*, mp.title as mapTitle 
+        FROM memos m 
+        LEFT JOIN maps mp ON m.mapId = mp.id 
+        ORDER BY m.id ASC
+      ''');
+
+      return result.map((json) => Memo.fromMap(json)).toList();
+    }
   }
 
   // タイトルでメモを検索
   Future<List<Memo>> searchMemosByTitle(String searchQuery) async {
-    final db = await instance.database;
-    final result = await db.rawQuery('''
-      SELECT m.*, mp.title as mapTitle 
-      FROM memos m 
-      LEFT JOIN maps mp ON m.mapId = mp.id 
-      WHERE m.title LIKE ? 
-      ORDER BY m.id ASC
-    ''', ['%$searchQuery%']);
+    if (kIsWeb) {
+      await init();
+      final memos = _memoBox!.values.toList();
+      final maps = _mapBox!.values.toList();
 
-    return result.map((json) => Memo.fromMap(json)).toList();
+      final filteredMemos = memos
+          .where((memo) =>
+              memo.title.toLowerCase().contains(searchQuery.toLowerCase()))
+          .toList();
+
+      // 地図タイトルを設定
+      for (var memo in filteredMemos) {
+        if (memo.mapId != null) {
+          final map = maps.firstWhere(
+            (m) => m.id == memo.mapId,
+            orElse: () => MapInfo(title: '不明な地図'),
+          );
+          memo.mapTitle = map.title;
+        }
+      }
+
+      return filteredMemos;
+    } else {
+      final db = await instance.database;
+      final result = await db.rawQuery('''
+        SELECT m.*, mp.title as mapTitle 
+        FROM memos m 
+        LEFT JOIN maps mp ON m.mapId = mp.id 
+        WHERE m.title LIKE ? 
+        ORDER BY m.id ASC
+      ''', ['%$searchQuery%']);
+
+      return result.map((json) => Memo.fromMap(json)).toList();
+    }
   }
 
   // 地図の名前でメモを検索
   Future<List<Memo>> searchMemosByMapTitle(String searchQuery) async {
-    final db = await instance.database;
-    final result = await db.rawQuery('''
-      SELECT m.*, mp.title as mapTitle 
-      FROM memos m 
-      LEFT JOIN maps mp ON m.mapId = mp.id 
-      WHERE mp.title LIKE ? 
-      ORDER BY m.id ASC
-    ''', ['%$searchQuery%']);
+    if (kIsWeb) {
+      await init();
+      final memos = _memoBox!.values.toList();
+      final maps = _mapBox!.values.toList();
 
-    return result.map((json) => Memo.fromMap(json)).toList();
+      // 検索クエリに一致する地図IDを取得
+      final matchingMaps = maps
+          .where((map) =>
+              map.title.toLowerCase().contains(searchQuery.toLowerCase()))
+          .toList();
+
+      final matchingMapIds = matchingMaps.map((map) => map.id).toSet();
+
+      final filteredMemos = memos
+          .where((memo) =>
+              memo.mapId != null && matchingMapIds.contains(memo.mapId))
+          .toList();
+
+      // 地図タイトルを設定
+      for (var memo in filteredMemos) {
+        if (memo.mapId != null) {
+          final map = maps.firstWhere(
+            (m) => m.id == memo.mapId,
+            orElse: () => MapInfo(title: '不明な地図'),
+          );
+          memo.mapTitle = map.title;
+        }
+      }
+
+      return filteredMemos;
+    } else {
+      final db = await instance.database;
+      final result = await db.rawQuery('''
+        SELECT m.*, mp.title as mapTitle 
+        FROM memos m 
+        LEFT JOIN maps mp ON m.mapId = mp.id 
+        WHERE mp.title LIKE ? 
+        ORDER BY m.id ASC
+      ''', ['%$searchQuery%']);
+
+      return result.map((json) => Memo.fromMap(json)).toList();
+    }
   }
 
   // タイトルまたは地図の名前でメモを検索
   Future<List<Memo>> searchMemos(String searchQuery) async {
-    final db = await instance.database;
-    final result = await db.rawQuery('''
-      SELECT m.*, mp.title as mapTitle 
-      FROM memos m 
-      LEFT JOIN maps mp ON m.mapId = mp.id 
-      WHERE m.title LIKE ? OR mp.title LIKE ? 
-      ORDER BY m.id ASC
-    ''', ['%$searchQuery%', '%$searchQuery%']);
+    if (kIsWeb) {
+      await init();
+      final memos = _memoBox!.values.toList();
+      final maps = _mapBox!.values.toList();
 
-    return result.map((json) => Memo.fromMap(json)).toList();
+      // 検索クエリに一致する地図IDを取得
+      final matchingMaps = maps
+          .where((map) =>
+              map.title.toLowerCase().contains(searchQuery.toLowerCase()))
+          .toList();
+
+      final matchingMapIds = matchingMaps.map((map) => map.id).toSet();
+
+      final filteredMemos = memos
+          .where((memo) =>
+              memo.title.toLowerCase().contains(searchQuery.toLowerCase()) ||
+              (memo.mapId != null && matchingMapIds.contains(memo.mapId)))
+          .toList();
+
+      // 地図タイトルを設定
+      for (var memo in filteredMemos) {
+        if (memo.mapId != null) {
+          final map = maps.firstWhere(
+            (m) => m.id == memo.mapId,
+            orElse: () => MapInfo(title: '不明な地図'),
+          );
+          memo.mapTitle = map.title;
+        }
+      }
+
+      return filteredMemos;
+    } else {
+      final db = await instance.database;
+      final result = await db.rawQuery('''
+        SELECT m.*, mp.title as mapTitle 
+        FROM memos m 
+        LEFT JOIN maps mp ON m.mapId = mp.id 
+        WHERE m.title LIKE ? OR mp.title LIKE ? 
+        ORDER BY m.id ASC
+      ''', ['%$searchQuery%', '%$searchQuery%']);
+
+      return result.map((json) => Memo.fromMap(json)).toList();
+    }
   }
 
   // 特定の地図IDのメモのみを取得
   Future<List<Memo>> readMemosByMapId(int? mapId) async {
-    final db = await instance.database;
-    final result = await db.query(
-      'memos',
-      where: mapId != null ? 'mapId = ?' : 'mapId IS NULL',
-      whereArgs: mapId != null ? [mapId] : null,
-      orderBy: 'id ASC',
-    );
+    if (kIsWeb) {
+      await init();
+      final memos = _memoBox!.values.toList();
 
-    return result.map((json) => Memo.fromMap(json)).toList();
+      return memos.where((memo) {
+        if (mapId == null) {
+          return memo.mapId == null;
+        } else {
+          return memo.mapId == mapId;
+        }
+      }).toList();
+    } else {
+      final db = await instance.database;
+      final result = await db.query(
+        'memos',
+        where: mapId != null ? 'mapId = ?' : 'mapId IS NULL',
+        whereArgs: mapId != null ? [mapId] : null,
+        orderBy: 'id ASC',
+      );
+
+      return result.map((json) => Memo.fromMap(json)).toList();
+    }
   }
 
   // 特定の地図画像パスのメモを取得（既存の地図ファイル用）
   Future<List<Memo>> readMemosByMapPath(String? mapImagePath) async {
-    final db = await instance.database;
+    if (kIsWeb) {
+      await init();
+      final memos = _memoBox!.values.toList();
+      final maps = _mapBox!.values.toList();
 
-    if (mapImagePath == null) {
-      // 地図画像パスがnullの場合は、mapIdもnullのメモを取得
-      final result = await db.query(
-        'memos',
-        where: 'mapId IS NULL',
-        orderBy: 'id ASC',
+      if (mapImagePath == null) {
+        // 地図画像パスがnullの場合は、mapIdもnullのメモを取得
+        return memos.where((memo) => memo.mapId == null).toList();
+      }
+
+      // 地図画像パスから地図IDを取得してメモを検索
+      final matchingMap = maps.firstWhere(
+        (map) => map.imagePath == mapImagePath,
+        orElse: () => MapInfo(title: ''),
       );
-      return result.map((json) => Memo.fromMap(json)).toList();
-    }
 
-    // 地図画像パスから地図IDを取得してメモを検索
-    final mapResult = await db.query(
-      'maps',
-      where: 'imagePath = ?',
-      whereArgs: [mapImagePath],
-    );
-
-    if (mapResult.isNotEmpty) {
-      final mapId = mapResult.first['id'] as int;
-      return readMemosByMapId(mapId);
+      if (matchingMap.id != null) {
+        return readMemosByMapId(matchingMap.id);
+      } else {
+        // 該当する地図がない場合は、mapIdがnullのメモを取得（デフォルト地図用）
+        return memos.where((memo) => memo.mapId == null).toList();
+      }
     } else {
-      // 該当する地図がない場合は、mapIdがnullのメモを取得（デフォルト地図用）
-      final result = await db.query(
-        'memos',
-        where: 'mapId IS NULL',
-        orderBy: 'id ASC',
+      final db = await instance.database;
+
+      if (mapImagePath == null) {
+        // 地図画像パスがnullの場合は、mapIdもnullのメモを取得
+        final result = await db.query(
+          'memos',
+          where: 'mapId IS NULL',
+          orderBy: 'id ASC',
+        );
+        return result.map((json) => Memo.fromMap(json)).toList();
+      }
+
+      // 地図画像パスから地図IDを取得してメモを検索
+      final mapResult = await db.query(
+        'maps',
+        where: 'imagePath = ?',
+        whereArgs: [mapImagePath],
       );
-      return result.map((json) => Memo.fromMap(json)).toList();
+
+      if (mapResult.isNotEmpty) {
+        final mapId = mapResult.first['id'] as int;
+        return readMemosByMapId(mapId);
+      } else {
+        // 該当する地図がない場合は、mapIdがnullのメモを取得（デフォルト地図用）
+        final result = await db.query(
+          'memos',
+          where: 'mapId IS NULL',
+          orderBy: 'id ASC',
+        );
+        return result.map((json) => Memo.fromMap(json)).toList();
+      }
     }
   }
 
@@ -235,86 +449,165 @@ CREATE TABLE maps (
   Future<int?> getOrCreateMapId(String? mapImagePath, String? mapTitle) async {
     if (mapImagePath == null) return null;
 
-    final db = await instance.database;
+    if (kIsWeb) {
+      await init();
+      final maps = _mapBox!.values.toList();
 
-    // 既存の地図を検索
-    final existing = await db.query(
-      'maps',
-      where: 'imagePath = ?',
-      whereArgs: [mapImagePath],
-    );
-
-    if (existing.isNotEmpty) {
-      return existing.first['id'] as int;
-    } else {
-      // 新しい地図を作成
-      final mapInfo = MapInfo(
-        title: mapTitle ?? 'カスタム地図',
-        imagePath: mapImagePath,
+      // 既存の地図を検索
+      final existing = maps.firstWhere(
+        (map) => map.imagePath == mapImagePath,
+        orElse: () => MapInfo(title: ''),
       );
-      final created = await createMap(mapInfo);
-      return created.id;
+
+      if (existing.id != null) {
+        return existing.id;
+      } else {
+        // 新しい地図を作成
+        final mapInfo = MapInfo(
+          title: mapTitle ?? 'カスタム地図',
+          imagePath: mapImagePath,
+        );
+        final created = await createMap(mapInfo);
+        return created.id;
+      }
+    } else {
+      final db = await instance.database;
+
+      // 既存の地図を検索
+      final existing = await db.query(
+        'maps',
+        where: 'imagePath = ?',
+        whereArgs: [mapImagePath],
+      );
+
+      if (existing.isNotEmpty) {
+        return existing.first['id'] as int;
+      } else {
+        // 新しい地図を作成
+        final mapInfo = MapInfo(
+          title: mapTitle ?? 'カスタム地図',
+          imagePath: mapImagePath,
+        );
+        final created = await createMap(mapInfo);
+        return created.id;
+      }
     }
   }
 
   Future<List<MapInfo>> readAllMaps() async {
-    final db = await instance.database;
-    const orderBy = 'id ASC';
-    final result = await db.query('maps', orderBy: orderBy);
+    if (kIsWeb) {
+      await init();
+      return _mapBox!.values.toList();
+    } else {
+      final db = await instance.database;
+      const orderBy = 'id ASC';
+      final result = await db.query('maps', orderBy: orderBy);
 
-    return result.map((json) => MapInfo.fromMap(json)).toList();
+      return result.map((json) => MapInfo.fromMap(json)).toList();
+    }
   }
 
   Future<int> update(Memo memo) async {
-    final db = await instance.database;
+    if (kIsWeb) {
+      await init();
+      if (memo.id != null) {
+        await _memoBox!.put(memo.id, memo);
+        return 1; // 成功を示す
+      }
+      return 0; // 失敗を示す
+    } else {
+      final db = await instance.database;
 
-    return db.update(
-      'memos',
-      memo.toMap(),
-      where: 'id = ?',
-      whereArgs: [memo.id],
-    );
+      return db.update(
+        'memos',
+        memo.toMap(),
+        where: 'id = ?',
+        whereArgs: [memo.id],
+      );
+    }
   }
 
   Future<int> updateMap(MapInfo mapInfo) async {
-    final db = await instance.database;
+    if (kIsWeb) {
+      await init();
+      if (mapInfo.id != null) {
+        await _mapBox!.put(mapInfo.id, mapInfo);
+        return 1; // 成功を示す
+      }
+      return 0; // 失敗を示す
+    } else {
+      final db = await instance.database;
 
-    return db.update(
-      'maps',
-      mapInfo.toMap(),
-      where: 'id = ?',
-      whereArgs: [mapInfo.id],
-    );
+      return db.update(
+        'maps',
+        mapInfo.toMap(),
+        where: 'id = ?',
+        whereArgs: [mapInfo.id],
+      );
+    }
   }
 
   Future<int> delete(int id) async {
-    final db = await instance.database;
+    if (kIsWeb) {
+      await init();
+      await _memoBox!.delete(id);
+      return 1; // 成功を示す
+    } else {
+      final db = await instance.database;
 
-    return await db.delete(
-      'memos',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+      return await db.delete(
+        'memos',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
   }
 
   Future<int> deleteMap(int id) async {
-    final db = await instance.database;
+    if (kIsWeb) {
+      await init();
 
-    await db.delete(
-      'memos',
-      where: 'mapId = ?',
-      whereArgs: [id],
-    );
+      // 関連するメモを削除
+      final memos = _memoBox!.values.toList();
+      final relatedMemoKeys = <dynamic>[];
 
-    return await db.delete(
-      'maps',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+      for (var entry in _memoBox!.toMap().entries) {
+        if (entry.value.mapId == id) {
+          relatedMemoKeys.add(entry.key);
+        }
+      }
+
+      for (var key in relatedMemoKeys) {
+        await _memoBox!.delete(key);
+      }
+
+      // 地図を削除
+      await _mapBox!.delete(id);
+      return 1; // 成功を示す
+    } else {
+      final db = await instance.database;
+
+      await db.delete(
+        'memos',
+        where: 'mapId = ?',
+        whereArgs: [id],
+      );
+
+      return await db.delete(
+        'maps',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
   }
 
   Future close() async {
-    final db = await instance.database;
-    db.close();
+    if (kIsWeb) {
+      await _mapBox?.close();
+      await _memoBox?.close();
+    } else {
+      final db = await instance.database;
+      db.close();
+    }
   }
 }

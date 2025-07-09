@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'dart:io';
+import 'dart:convert';
 import '../models/map_info.dart';
 import '../utils/database_helper.dart';
-import 'map_screen.dart';
 import 'add_map_screen.dart';
+import 'map_screen.dart';
 
 class MapListScreen extends StatefulWidget {
   const MapListScreen({Key? key}) : super(key: key);
@@ -210,22 +212,7 @@ class _MapListScreenState extends State<MapListScreen> {
                       borderRadius: const BorderRadius.vertical(
                         top: Radius.circular(8.0),
                       ),
-                      child: Image.file(
-                        File(map.imagePath!),
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            color: Colors.grey.shade200,
-                            child: const Center(
-                              child: Icon(
-                                Icons.broken_image,
-                                size: 48,
-                                color: Colors.grey,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
+                      child: _buildImageWidget(map.imagePath!),
                     ),
                   ),
                 Padding(
@@ -273,5 +260,47 @@ class _MapListScreenState extends State<MapListScreen> {
         );
       },
     );
+  }
+
+  Widget _buildImageWidget(String imagePath) {
+    if (kIsWeb && imagePath.startsWith('data:image')) {
+      // Web環境でBase64データの場合
+      final base64Data = imagePath.split(',')[1];
+      final bytes = base64Decode(base64Data);
+      return Image.memory(
+        bytes,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return Container(
+            color: Colors.grey.shade200,
+            child: const Center(
+              child: Icon(
+                Icons.broken_image,
+                size: 48,
+                color: Colors.grey,
+              ),
+            ),
+          );
+        },
+      );
+    } else {
+      // モバイル/デスクトップ環境またはWebでファイルパスの場合
+      return Image.file(
+        File(imagePath),
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return Container(
+            color: Colors.grey.shade200,
+            child: const Center(
+              child: Icon(
+                Icons.broken_image,
+                size: 48,
+                color: Colors.grey,
+              ),
+            ),
+          );
+        },
+      );
+    }
   }
 }

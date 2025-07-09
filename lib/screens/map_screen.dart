@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:hive/hive.dart';
 import 'dart:io';
 import '../models/memo.dart';
 import '../models/map_info.dart';
@@ -39,12 +41,24 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _loadCustomMapPath() async {
     try {
-      final directory = await getApplicationDocumentsDirectory();
-      final mapFile = File('${directory.path}/custom_map.png');
-      if (await mapFile.exists()) {
-        setState(() {
-          _customMapPath = mapFile.path;
-        });
+      if (kIsWeb) {
+        // Web版: Hiveから画像データを読み込み
+        final box = await Hive.openBox('app_settings');
+        final savedMapData = box.get('custom_map_image');
+        if (savedMapData != null) {
+          setState(() {
+            _customMapPath = savedMapData; // Base64文字列
+          });
+        }
+      } else {
+        // モバイル版: ファイルシステムから読み込み
+        final directory = await getApplicationDocumentsDirectory();
+        final mapFile = File('${directory.path}/custom_map.png');
+        if (await mapFile.exists()) {
+          setState(() {
+            _customMapPath = mapFile.path;
+          });
+        }
       }
     } catch (e) {
       print('地図ファイルの読み込み中にエラーが発生しました: $e');
@@ -210,7 +224,12 @@ class _MapScreenState extends State<MapScreen> {
             onPressed: () async {
               await Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const MemoListScreen()),
+                MaterialPageRoute(
+                  builder: (context) => MemoListScreen(
+                    memos: _memos,
+                    mapTitle: widget.mapInfo?.title ?? 'カスタム地図',
+                  ),
+                ),
               );
               _loadMemos();
             },

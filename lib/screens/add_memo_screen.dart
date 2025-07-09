@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 // import 'package:geolocator/geolocator.dart';  // 一時的に無効化
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 import '../models/memo.dart';
 import '../models/map_info.dart';
 import '../utils/database_helper.dart';
+import '../utils/ai_service.dart';
+import '../utils/audio_service.dart';
 
 class AddMemoScreen extends StatefulWidget {
   final double? initialLatitude;
@@ -36,6 +40,13 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
   String? _selectedCategory;
   int? _selectedMapId;
   List<MapInfo> _maps = [];
+
+  // AI機能用の状態変数
+  bool _isAnalyzing = false;
+  File? _selectedImage;
+  String? _audioPath;
+  bool _isRecording = false;
+  bool _isPlaying = false;
 
   final List<String> _categories = [
     '植物',
@@ -199,6 +210,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
             : _notesController.text.trim(),
         pinNumber: nextPinNumber, // 自動的に次の番号を割り当て
         mapId: _selectedMapId, // 選択された地図ID
+        audioPath: _audioPath, // 音声ファイルのパス
       );
 
       await DatabaseHelper.instance.create(memo);
@@ -228,6 +240,367 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
     return '${dateTime.year}/${dateTime.month.toString().padLeft(2, '0')}/${dateTime.day.toString().padLeft(2, '0')} ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
 
+  // 画像を選択して分析
+  Future<void> _pickAndAnalyzeImage() async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 80,
+      );
+
+      if (image != null) {
+        setState(() {
+          _selectedImage = File(image.path);
+          _isAnalyzing = true;
+        });
+
+        if (AIService.isConfigured) {
+          try {
+            final analysis = await AIService.analyzeImage(_selectedImage!);
+
+            // 分析結果をフィールドに自動入力
+            if (analysis['title'] != null && analysis['title']!.isNotEmpty) {
+              _titleController.text = analysis['title']!;
+            }
+            if (analysis['content'] != null &&
+                analysis['content']!.isNotEmpty) {
+              _contentController.text = analysis['content']!;
+            }
+            if (analysis['category'] != null &&
+                _categories.contains(analysis['category'])) {
+              setState(() {
+                _selectedCategory = analysis['category'];
+              });
+            }
+            if (analysis['notes'] != null && analysis['notes']!.isNotEmpty) {
+              _notesController.text = analysis['notes']!;
+            }
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('AI分析が完了しました！フィールドが自動入力されました。'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          } catch (aiError) {
+            // AI分析エラーの詳細な処理
+            String errorMessage = '画像分析中にエラーが発生しました。';
+
+            if (aiError.toString().contains('503') ||
+                aiError.toString().contains('overloaded') ||
+                aiError.toString().contains('unavailable')) {
+              errorMessage = 'AIサーバーが一時的に混雑しています。\nしばらく時間をおいてから再試行してください。';
+            } else if (aiError.toString().contains('429')) {
+              errorMessage = 'AI機能の使用回数制限に達しました。\nしばらく時間をおいてから再試行してください。';
+            } else if (aiError.toString().contains('401') ||
+                aiError.toString().contains('403')) {
+              errorMessage = 'AI機能の認証に失敗しました。\n設定画面でAPIキーを確認してください。';
+            }
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(errorMessage),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 5),
+              ),
+            );
+          }
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('AIサービスが設定されていません。\n設定画面でAPIキーを設定してください。'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('画像の選択に失敗しました: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() {
+        _isAnalyzing = false;
+      });
+    }
+  }
+
+  // 音声録音の開始/停止
+  Future<void> _toggleRecording() async {
+    if (_isRecording) {
+      // 録音停止
+      final path = await AudioService.stopRecording();
+      if (path != null) {
+        setState(() {
+          _audioPath = path;
+          _isRecording = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('録音が完了しました'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } else {
+      // 録音開始
+      final success = await AudioService.startRecording();
+      if (success) {
+        setState(() {
+          _isRecording = true;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('録音を開始しました'),
+            backgroundColor: Colors.blue,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('録音の開始に失敗しました'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // 音声再生の開始/停止
+  Future<void> _togglePlayback() async {
+    if (_audioPath == null) return;
+
+    if (_isPlaying) {
+      await AudioService.stopPlaying();
+      setState(() {
+        _isPlaying = false;
+      });
+    } else {
+      final success = await AudioService.playAudio(_audioPath!);
+      if (success) {
+        setState(() {
+          _isPlaying = true;
+        });
+
+        // 再生完了を監視
+        Future.delayed(const Duration(seconds: 1), () async {
+          while (AudioService.isPlaying && mounted) {
+            await Future.delayed(const Duration(milliseconds: 100));
+          }
+          if (mounted) {
+            setState(() {
+              _isPlaying = false;
+            });
+          }
+        });
+      }
+    }
+  }
+
+  // 音声削除
+  Future<void> _deleteAudio() async {
+    if (_audioPath != null) {
+      await AudioService.deleteAudioFile(_audioPath!);
+      setState(() {
+        _audioPath = null;
+        _isPlaying = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('音声メモを削除しました'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    }
+  }
+
+  // AIアシスト機能
+  Future<void> _showAIAssistant() async {
+    if (!AIService.isConfigured) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('AIサービスが設定されていません。'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('🤖 AI アシスタント'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.auto_fix_high, color: Colors.blue),
+              title: const Text('内容を改善'),
+              subtitle: const Text('現在の内容をより詳細に改善します'),
+              onTap: () async {
+                Navigator.pop(context);
+                await _improveContent();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.help, color: Colors.green),
+              title: const Text('質問する'),
+              subtitle: const Text('フィールドワークについて質問できます'),
+              onTap: () async {
+                Navigator.pop(context);
+                await _askQuestion();
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('閉じる'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 内容改善機能
+  Future<void> _improveContent() async {
+    if (_contentController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('改善する内容を入力してください'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isAnalyzing = true;
+    });
+
+    try {
+      final improved =
+          await AIService.improveMemoContent(_contentController.text);
+
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('改善提案'),
+          content: SingleChildScrollView(
+            child: Text(improved),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('キャンセル'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                _contentController.text = improved;
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('内容を更新しました'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              },
+              child: const Text('適用'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('改善提案の生成に失敗しました: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() {
+        _isAnalyzing = false;
+      });
+    }
+  }
+
+  // 質問機能
+  Future<void> _askQuestion() async {
+    final controller = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('AIに質問'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            hintText: 'フィールドワークについて質問してください',
+            border: OutlineInputBorder(),
+          ),
+          maxLines: 3,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('キャンセル'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final question = controller.text.trim();
+              if (question.isNotEmpty) {
+                Navigator.pop(context);
+
+                setState(() {
+                  _isAnalyzing = true;
+                });
+
+                try {
+                  final memos = await DatabaseHelper.instance.readAllMemos();
+                  final answer = await AIService.askQuestion(question, memos);
+
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: Text('質問: $question'),
+                      content: SingleChildScrollView(
+                        child: Text(answer),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('閉じる'),
+                        ),
+                      ],
+                    ),
+                  );
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('回答の生成に失敗しました: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                } finally {
+                  setState(() {
+                    _isAnalyzing = false;
+                  });
+                }
+              }
+            },
+            child: const Text('質問'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -236,6 +609,17 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
             ? const Text('選択地点の記録')
             : const Text('新しい記録'),
         actions: [
+          IconButton(
+            icon: _isAnalyzing
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.smart_toy, color: Colors.blue),
+            tooltip: 'AIアシスタント',
+            onPressed: _isAnalyzing ? null : _showAIAssistant,
+          ),
           IconButton(
             icon: _isSaving
                 ? const SizedBox(
@@ -400,6 +784,167 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
             ),
             const SizedBox(height: 16),
 
+            // AI機能セクション
+            Card(
+              color: Colors.blue.shade50,
+              child: Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.smart_toy, color: Colors.blue.shade700),
+                        const SizedBox(width: 8),
+                        Text(
+                          'AI機能',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    // 画像分析ボタン
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: _isAnalyzing ? null : _pickAndAnalyzeImage,
+                        icon: _isAnalyzing
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.camera_alt),
+                        label: Text(_isAnalyzing ? '分析中...' : '📸 写真を撮影してAI分析'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
+
+                    if (_selectedImage != null) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        height: 100,
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.file(
+                            _selectedImage!,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 12),
+
+                    // 音声録音セクション
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _toggleRecording,
+                            icon: Icon(_isRecording ? Icons.stop : Icons.mic),
+                            label: Text(_isRecording ? '🎙️ 録音停止' : '🎙️ 音声録音'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor:
+                                  _isRecording ? Colors.red : Colors.green,
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                        ),
+                        if (_audioPath != null) ...[
+                          const SizedBox(width: 8),
+                          IconButton(
+                            onPressed: _togglePlayback,
+                            icon: Icon(
+                                _isPlaying ? Icons.pause : Icons.play_arrow),
+                            color: Colors.blue,
+                            tooltip: _isPlaying ? '再生停止' : '再生',
+                          ),
+                          IconButton(
+                            onPressed: _deleteAudio,
+                            icon: const Icon(Icons.delete),
+                            color: Colors.red,
+                            tooltip: '削除',
+                          ),
+                        ],
+                      ],
+                    ),
+
+                    if (_audioPath != null) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.green.shade100,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.green.shade300),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.audiotrack,
+                                color: Colors.green.shade700),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '音声メモが録音されました',
+                                style: TextStyle(
+                                  color: Colors.green.shade700,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    if (_isRecording) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade100,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.red.shade300),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.fiber_manual_record,
+                                color: Colors.red.shade700),
+                            const SizedBox(width: 8),
+                            Text(
+                              '録音中...',
+                              style: TextStyle(
+                                color: Colors.red.shade700,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
             TextField(
               controller: _notesController,
               decoration: const InputDecoration(
@@ -548,6 +1093,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
     _discovererController.dispose();
     _specimenNumberController.dispose();
     _notesController.dispose();
+    AudioService.dispose(); // AudioServiceのリソース解放
     super.dispose();
   }
 }

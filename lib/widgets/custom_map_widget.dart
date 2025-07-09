@@ -1,9 +1,13 @@
 import 'dart:io';
 import 'dart:ui' as ui;
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
+import 'package:hive/hive.dart';
 import '../models/memo.dart';
 import '../utils/database_helper.dart';
 
@@ -107,12 +111,24 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
 
   Future<void> _loadSavedMapImage() async {
     try {
-      final directory = await getApplicationDocumentsDirectory();
-      final mapFile = File('${directory.path}/custom_map.png');
-      if (await mapFile.exists()) {
-        setState(() {
-          _mapImagePath = mapFile.path;
-        });
+      if (kIsWeb) {
+        // Web版: Hiveから画像データを読み込み
+        final box = await Hive.openBox('app_settings');
+        final savedMapData = box.get('custom_map_image');
+        if (savedMapData != null) {
+          setState(() {
+            _mapImagePath = savedMapData; // Base64文字列
+          });
+        }
+      } else {
+        // モバイル版: ファイルシステムから読み込み
+        final directory = await getApplicationDocumentsDirectory();
+        final mapFile = File('${directory.path}/custom_map.png');
+        if (await mapFile.exists()) {
+          setState(() {
+            _mapImagePath = mapFile.path;
+          });
+        }
       }
     } catch (e) {
       print('地図ファイルの読み込み中にエラーが発生しました: $e');
@@ -123,7 +139,23 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
     if (_mapImagePath == null) {
       throw Exception('地図画像パスが設定されていません');
     }
-    final bytes = await File(_mapImagePath!).readAsBytes();
+
+    Uint8List bytes;
+    if (kIsWeb) {
+      // Web版: Base64文字列をデコード
+      if (_mapImagePath!.startsWith('data:image')) {
+        // Base64データURL形式の場合
+        final base64Data = _mapImagePath!.split(',')[1];
+        bytes = base64Decode(base64Data);
+      } else {
+        // 直接Base64文字列の場合
+        bytes = base64Decode(_mapImagePath!);
+      }
+    } else {
+      // モバイル版: ファイルから読み込み
+      bytes = await File(_mapImagePath!).readAsBytes();
+    }
+
     final codec = await ui.instantiateImageCodec(bytes);
     final frame = await codec.getNextFrame();
     return frame.image;
@@ -137,18 +169,34 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
       );
 
       if (result != null) {
-        File selectedFile = File(result.files.single.path!);
+        if (kIsWeb) {
+          // Web版: ファイルをBase64エンコードしてHiveに保存
+          final fileBytes = result.files.single.bytes!;
+          final base64Image = base64Encode(fileBytes);
+          final dataUrl = 'data:image/png;base64,$base64Image';
 
-        // アプリのドキュメントディレクトリにファイルをコピー
-        final directory = await getApplicationDocumentsDirectory();
-        final fileName = 'custom_map${path.extension(selectedFile.path)}';
-        final savedFile = File('${directory.path}/$fileName');
+          // Hiveに保存
+          final box = await Hive.openBox('app_settings');
+          await box.put('custom_map_image', dataUrl);
 
-        await selectedFile.copy(savedFile.path);
+          setState(() {
+            _mapImagePath = dataUrl;
+          });
+        } else {
+          // モバイル版: ファイルシステムに保存
+          File selectedFile = File(result.files.single.path!);
 
-        setState(() {
-          _mapImagePath = savedFile.path;
-        });
+          // アプリのドキュメントディレクトリにファイルをコピー
+          final directory = await getApplicationDocumentsDirectory();
+          final fileName = 'custom_map${path.extension(selectedFile.path)}';
+          final savedFile = File('${directory.path}/$fileName');
+
+          await selectedFile.copy(savedFile.path);
+
+          setState(() {
+            _mapImagePath = savedFile.path;
+          });
+        }
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('地図画像を設定しました')),
@@ -163,10 +211,17 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
 
   Future<void> _clearMapImage() async {
     try {
-      final directory = await getApplicationDocumentsDirectory();
-      final mapFile = File('${directory.path}/custom_map.png');
-      if (await mapFile.exists()) {
-        await mapFile.delete();
+      if (kIsWeb) {
+        // Web版: Hiveからデータを削除
+        final box = await Hive.openBox('app_settings');
+        await box.delete('custom_map_image');
+      } else {
+        // モバイル版: ファイルを削除
+        final directory = await getApplicationDocumentsDirectory();
+        final mapFile = File('${directory.path}/custom_map.png');
+        if (await mapFile.exists()) {
+          await mapFile.delete();
+        }
       }
 
       setState(() {
@@ -301,18 +356,24 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
                         top: _offsetY,
                         width: _actualDisplayWidth,
                         height: _actualDisplayHeight,
-                        child: Image.file(
-                          File(_mapImagePath!),
-                          fit: BoxFit.fill, // 正確なサイズに合わせるためfillを使用
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              color: Colors.grey[300],
-                              child: const Center(
-                                child: Text('地図画像を読み込めませんでした'),
+                        child: kIsWeb
+                            ?
+                            // Web版: Base64データから画像を表示
+                            _buildWebImage(_mapImagePath!)
+                            :
+                            // モバイル版: ファイルから画像を表示
+                            Image.file(
+                                File(_mapImagePath!),
+                                fit: BoxFit.fill,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Container(
+                                    color: Colors.grey[300],
+                                    child: const Center(
+                                      child: Text('地図画像を読み込めませんでした'),
+                                    ),
+                                  );
+                                },
                               ),
-                            );
-                          },
-                        ),
                       ),
 
                       // ピンは画像読み込み完了後のみ表示
@@ -408,6 +469,41 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
         ),
       ),
     );
+  }
+
+  // Web版での画像表示メソッド
+  Widget _buildWebImage(String imagePath) {
+    try {
+      Uint8List bytes;
+      if (imagePath.startsWith('data:image')) {
+        // Base64データURL形式の場合
+        final base64Data = imagePath.split(',')[1];
+        bytes = base64Decode(base64Data);
+      } else {
+        // 直接Base64文字列の場合
+        bytes = base64Decode(imagePath);
+      }
+
+      return Image.memory(
+        bytes,
+        fit: BoxFit.fill,
+        errorBuilder: (context, error, stackTrace) {
+          return Container(
+            color: Colors.grey[300],
+            child: const Center(
+              child: Text('地図画像を読み込めませんでした'),
+            ),
+          );
+        },
+      );
+    } catch (e) {
+      return Container(
+        color: Colors.grey[300],
+        child: const Center(
+          child: Text('地図画像の形式が正しくありません'),
+        ),
+      );
+    }
   }
 
   Color _getCategoryColor(String? category) {

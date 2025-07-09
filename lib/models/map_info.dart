@@ -1,6 +1,14 @@
+import 'package:hive/hive.dart';
+
+part 'map_info.g.dart';
+
+@HiveType(typeId: 0)
 class MapInfo {
+  @HiveField(0)
   final int? id;
+  @HiveField(1)
   final String title;
+  @HiveField(2)
   final String? imagePath;
 
   MapInfo({this.id, required this.title, this.imagePath});
