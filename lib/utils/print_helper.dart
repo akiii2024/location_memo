@@ -12,7 +12,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:convert'; // Base64デコード用
 // 条件付きimport（Web環境でのみdart:htmlをimport）
-import 'dart:html' if (dart.library.html) 'dart:io' as html;
+import 'dart:html' if (dart.library.html) 'dart:html' as html;
 
 import '../models/memo.dart';
 
@@ -62,11 +62,16 @@ class PrintHelper {
   static bool _isMobileWeb() {
     if (!kIsWeb) return false;
 
-    final userAgent = html.window.navigator.userAgent.toLowerCase();
-    return userAgent.contains('mobile') ||
-        userAgent.contains('android') ||
-        userAgent.contains('iphone') ||
-        userAgent.contains('ipad');
+    try {
+      final userAgent = html.window.navigator.userAgent.toLowerCase();
+      return userAgent.contains('mobile') ||
+          userAgent.contains('android') ||
+          userAgent.contains('iphone') ||
+          userAgent.contains('ipad');
+    } catch (e) {
+      // Web環境でない場合はfalseを返す
+      return false;
+    }
   }
 
   // 日本語フォントを取得するヘルパーメソッド
@@ -124,12 +129,16 @@ class PrintHelper {
   static void _downloadPdfInWeb(Uint8List pdfBytes, String filename) {
     if (!kIsWeb) return;
 
-    final blob = html.Blob([pdfBytes], 'application/pdf');
-    final url = html.Url.createObjectUrlFromBlob(blob);
-    final anchor = html.AnchorElement(href: url)
-      ..setAttribute('download', filename)
-      ..click();
-    html.Url.revokeObjectUrl(url);
+    try {
+      final blob = html.Blob([pdfBytes], 'application/pdf');
+      final url = html.Url.createObjectUrlFromBlob(blob);
+      final anchor = html.AnchorElement(href: url)
+        ..setAttribute('download', filename)
+        ..click();
+      html.Url.revokeObjectUrl(url);
+    } catch (e) {
+      print('Web PDFダウンロードエラー: $e');
+    }
   }
 
   // 印刷またはダウンロード処理（Web版の制限に対応）
