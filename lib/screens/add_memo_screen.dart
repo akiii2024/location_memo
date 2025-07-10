@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 // import 'package:geolocator/geolocator.dart';  // 一時的に無効化
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
@@ -335,6 +336,18 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
     return '${dateTime.year}/${dateTime.month.toString().padLeft(2, '0')}/${dateTime.day.toString().padLeft(2, '0')} ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
 
+  /// Web環境でHTTPS接続かどうかを確認
+  bool _isHttpsConnection() {
+    if (!kIsWeb) return true; // Web以外では常にtrue
+
+    try {
+      // Web環境でのURLプロトコル確認
+      return Uri.base.scheme == 'https';
+    } catch (e) {
+      return false;
+    }
+  }
+
   /// AI分析結果のカテゴリを既存のカテゴリリストにマッチング
   String? _findMatchingCategory(String aiCategory) {
     // 完全一致をチェック
@@ -394,8 +407,46 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
   Future<void> _pickAndAnalyzeImage() async {
     try {
       final ImagePicker picker = ImagePicker();
+
+      // Web環境では画像ソース選択ダイアログを表示
+      ImageSource? source = ImageSource.camera; // デフォルトはカメラ
+
+      if (kIsWeb) {
+        source = await showDialog<ImageSource>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('画像を選択'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.camera_alt),
+                  title: const Text('カメラで撮影'),
+                  subtitle: const Text('新しく写真を撮影してAI分析'),
+                  onTap: () => Navigator.pop(context, ImageSource.camera),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_library),
+                  title: const Text('ギャラリーから選択'),
+                  subtitle: const Text('保存済みの画像からAI分析'),
+                  onTap: () => Navigator.pop(context, ImageSource.gallery),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('キャンセル'),
+              ),
+            ],
+          ),
+        );
+
+        if (source == null) return;
+      }
+
       final XFile? image = await picker.pickImage(
-        source: ImageSource.camera,
+        source: source,
         imageQuality: 80,
       );
 
@@ -489,10 +540,19 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         }
       }
     } catch (e) {
+      String errorMessage = '画像の選択に失敗しました: $e';
+      if (kIsWeb && e.toString().contains('NotAllowedError')) {
+        errorMessage = '画像の選択に失敗しました\n'
+            '• カメラへのアクセス許可を確認してください\n'
+            '• ブラウザの設定でカメラが有効か確認してください\n'
+            '• HTTPS接続を確認してください';
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('画像の選択に失敗しました: $e'),
+          content: Text(errorMessage),
           backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
         ),
       );
     } finally {
@@ -533,10 +593,19 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
           ),
         );
       } else {
+        String errorMessage = '録音の開始に失敗しました';
+        if (kIsWeb) {
+          errorMessage = '録音の開始に失敗しました\n'
+              '• HTTPS接続を確認してください\n'
+              '• マイクへのアクセス許可を確認してください\n'
+              '• ブラウザでマイクが有効か確認してください';
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('録音の開始に失敗しました'),
+          SnackBar(
+            content: Text(errorMessage),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
           ),
         );
       }
@@ -1174,6 +1243,48 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                     ),
                     const SizedBox(height: 12),
 
+                    // Web環境での画像選択についての説明
+                    if (kIsWeb) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(8),
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.green.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.green.shade200),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.info,
+                                    color: Colors.green.shade600, size: 16),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Web版画像分析について',
+                                  style: TextStyle(
+                                    color: Colors.green.shade700,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '• カメラ撮影とギャラリー選択が利用可能\n• HTTPS接続でカメラアクセス可能${_isHttpsConnection() ? ' ✓' : ' ⚠️'}\n• iPhoneでは設定でカメラ許可が必要',
+                              style: TextStyle(
+                                color: Colors.green.shade600,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
                     // 画像分析ボタン
                     SizedBox(
                       width: double.infinity,
@@ -1187,7 +1298,11 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                                     CircularProgressIndicator(strokeWidth: 2),
                               )
                             : const Icon(Icons.camera_alt),
-                        label: Text(_isAnalyzing ? '分析中...' : '📸 写真を撮影してAI分析'),
+                        label: Text(_isAnalyzing
+                            ? '分析中...'
+                            : kIsWeb
+                                ? '📸 画像を選択してAI分析'
+                                : '📸 写真を撮影してAI分析'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.blue,
                           foregroundColor: Colors.white,
@@ -1235,13 +1350,59 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                     const SizedBox(height: 12),
 
                     // 音声録音セクション
+                    if (kIsWeb) ...[
+                      // Web環境向けの説明
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(8),
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.blue.shade200),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.info,
+                                    color: Colors.blue.shade600, size: 16),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Web版音声録音について',
+                                  style: TextStyle(
+                                    color: Colors.blue.shade700,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '• HTTPS接続が必要です${_isHttpsConnection() ? ' ✓' : ' ⚠️'}\n• マイクへのアクセス許可が必要です\n• 初回使用時にブラウザで許可してください',
+                              style: TextStyle(
+                                color: Colors.blue.shade600,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
                     Row(
                       children: [
                         Expanded(
                           child: ElevatedButton.icon(
                             onPressed: _toggleRecording,
                             icon: Icon(_isRecording ? Icons.stop : Icons.mic),
-                            label: Text(_isRecording ? '🎙️ 録音停止' : '🎙️ 音声録音'),
+                            label: Text(_isRecording
+                                ? '🎙️ 録音停止'
+                                : kIsWeb
+                                    ? '🎙️ Web音声録音'
+                                    : '🎙️ 音声録音'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor:
                                   _isRecording ? Colors.red : Colors.green,
