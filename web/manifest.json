@@ -1,11 +1,11 @@
 {
-    "name": "location_memo",
-    "short_name": "location_memo",
+    "name": "Location Memo",
+    "short_name": "Location Memo",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#hexcode",
-    "theme_color": "#hexcode",
-    "description": "A new Flutter project.",
+    "background_color": "#ffffff",
+    "theme_color": "#2196f3",
+    "description": "位置情報付きメモアプリ - 場所とメモを簡単に記録・管理",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
