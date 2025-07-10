@@ -11,6 +11,8 @@ import 'package:printing/printing.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:convert'; // Base64デコード用
+// 条件付きimport（Web環境でのみdart:htmlをimport）
+import 'dart:html' if (dart.library.html) 'dart:io' as html;
 
 import '../models/memo.dart';
 
@@ -54,6 +56,17 @@ class PrintHelper {
       // モバイル版: ファイルから読み込み
       return File(imagePath).readAsBytes();
     }
+  }
+
+  // モバイル・デスクトップ用かどうかを判定
+  static bool _isMobileWeb() {
+    if (!kIsWeb) return false;
+
+    final userAgent = html.window.navigator.userAgent.toLowerCase();
+    return userAgent.contains('mobile') ||
+        userAgent.contains('android') ||
+        userAgent.contains('iphone') ||
+        userAgent.contains('ipad');
   }
 
   // 日本語フォントを取得するヘルパーメソッド
@@ -105,6 +118,61 @@ class PrintHelper {
       // 日本語をサポートするフォントのみをフォールバックに使用
       // 必要に応じて他の日本語フォントを追加可能
     );
+  }
+
+  // Web版でのPDFダウンロード処理
+  static void _downloadPdfInWeb(Uint8List pdfBytes, String filename) {
+    if (!kIsWeb) return;
+
+    final blob = html.Blob([pdfBytes], 'application/pdf');
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    final anchor = html.AnchorElement(href: url)
+      ..setAttribute('download', filename)
+      ..click();
+    html.Url.revokeObjectUrl(url);
+  }
+
+  // 印刷またはダウンロード処理（Web版の制限に対応）
+  static Future<void> _printOrDownloadPdf(
+      pw.Document pdf, String defaultFilename,
+      {bool showSuccessMessage = true}) async {
+    try {
+      if (kIsWeb && _isMobileWeb()) {
+        // モバイルWebブラウザ（iPhone Safari等）の場合は直接ダウンロード
+        final pdfBytes = await pdf.save();
+        _downloadPdfInWeb(pdfBytes, defaultFilename);
+
+        if (showSuccessMessage) {
+          print('PDFをダウンロードしました: $defaultFilename');
+        }
+      } else {
+        // デスクトップブラウザまたはネイティブアプリの場合は印刷ダイアログを表示
+        try {
+          await Printing.layoutPdf(
+            onLayout: (PdfPageFormat format) async => pdf.save(),
+          );
+        } catch (printError) {
+          // 印刷に失敗した場合はダウンロードにフォールバック
+          print('印刷に失敗しました。ダウンロードします: $printError');
+          final pdfBytes = await pdf.save();
+
+          if (kIsWeb) {
+            _downloadPdfInWeb(pdfBytes, defaultFilename);
+          } else {
+            // ネイティブアプリの場合はファイルシステムに保存
+            final output = await getApplicationDocumentsDirectory();
+            final file = File('${output.path}/$defaultFilename');
+            await file.writeAsBytes(pdfBytes);
+          }
+
+          if (showSuccessMessage) {
+            print('PDFをダウンロードしました: $defaultFilename');
+          }
+        }
+      }
+    } catch (e) {
+      throw Exception('PDF処理に失敗しました: $e');
+    }
   }
 
   // 地図画像とピンを合成するヘルパー関数
@@ -316,9 +384,9 @@ class PrintHelper {
       ),
     );
 
-    // PDFを表示・印刷
-    await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => pdf.save());
+    // 印刷またはダウンロード
+    await _printOrDownloadPdf(
+        pdf, 'fieldwork_map_${DateTime.now().millisecondsSinceEpoch}.pdf');
   }
 
   static Future<void> printMapImage(String? mapImagePath) async {
@@ -369,9 +437,9 @@ class PrintHelper {
       ),
     );
 
-    // PDFを表示・印刷
-    await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => pdf.save());
+    // 印刷またはダウンロード
+    await _printOrDownloadPdf(pdf,
+        'fieldwork_map_image_${DateTime.now().millisecondsSinceEpoch}.pdf');
   }
 
   static Future<void> printMemoReport(List<Memo> memos,
@@ -447,9 +515,9 @@ class PrintHelper {
       );
     }
 
-    // PDFを表示・印刷
-    await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => pdf.save());
+    // 印刷またはダウンロード
+    await _printOrDownloadPdf(
+        pdf, 'fieldwork_report_${DateTime.now().millisecondsSinceEpoch}.pdf');
   }
 
   static pw.Widget _buildMemoItem(Memo memo, pw.Font font, pw.Font boldFont) {
@@ -624,12 +692,12 @@ class PrintHelper {
         );
       }
 
-      // ファイルを保存
+      // ファイルを保存またはダウンロード
       if (kIsWeb) {
-        // Web版: PDFを直接ダウンロード
-        await Printing.layoutPdf(
-          onLayout: (PdfPageFormat format) async => pdf.save(),
-        );
+        // Web版: 直接ダウンロード
+        final pdfBytes = await pdf.save();
+        _downloadPdfInWeb(pdfBytes,
+            'fieldwork_report_${DateTime.now().millisecondsSinceEpoch}.pdf');
       } else {
         // モバイル版: ファイルシステムに保存
         final output = await getApplicationDocumentsDirectory();

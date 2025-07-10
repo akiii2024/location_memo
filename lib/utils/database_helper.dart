@@ -140,8 +140,22 @@ CREATE TABLE maps (
     if (kIsWeb) {
       await init();
       final key = await _mapBox!.add(mapInfo);
+
+      // キーをintに変換（Hiveのキーはdynamicなのでintにキャスト）
+      int? convertedId;
+      if (key is int) {
+        convertedId = key;
+      } else if (key != null) {
+        // 文字列や他の型の場合はint型に変換を試行
+        final keyString = key.toString();
+        convertedId = int.tryParse(keyString);
+      }
+
       return MapInfo(
-          id: key, title: mapInfo.title, imagePath: mapInfo.imagePath);
+        id: convertedId,
+        title: mapInfo.title,
+        imagePath: mapInfo.imagePath,
+      );
     } else {
       final db = await instance.database;
       final id = await db.insert('maps', mapInfo.toMap());
@@ -504,7 +518,33 @@ CREATE TABLE maps (
   Future<List<MapInfo>> readAllMaps() async {
     if (kIsWeb) {
       await init();
-      return _mapBox!.values.toList();
+      final mapsList = <MapInfo>[];
+
+      // HiveのBoxから全ての地図を取得し、キーをIDとして設定
+      for (final entry in _mapBox!.toMap().entries) {
+        final key = entry.key;
+        final mapInfo = entry.value;
+
+        // キーをintに変換
+        int? convertedId;
+        if (key is int) {
+          convertedId = key;
+        } else if (key != null) {
+          final keyString = key.toString();
+          convertedId = int.tryParse(keyString);
+        }
+
+        // IDが設定されたMapInfoを作成
+        final mapWithId = MapInfo(
+          id: convertedId,
+          title: mapInfo.title,
+          imagePath: mapInfo.imagePath,
+        );
+
+        mapsList.add(mapWithId);
+      }
+
+      return mapsList;
     } else {
       final db = await instance.database;
       const orderBy = 'id ASC';

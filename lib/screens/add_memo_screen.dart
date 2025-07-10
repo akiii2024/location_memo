@@ -79,11 +79,41 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
   Future<void> _loadMaps() async {
     try {
       final maps = await DatabaseHelper.instance.readAllMaps();
+      print('読み込んだ地図数: ${maps.length}');
+      if (maps.isNotEmpty) {
+        print(
+            '地図一覧: ${maps.map((m) => 'ID:${m.id} タイトル:${m.title}').join(', ')}');
+      }
+      print('初期選択されたMapID: $_selectedMapId');
+
+      // IDがnullの地図をチェック
+      final mapsWithNullId = maps.where((map) => map.id == null).toList();
+      if (mapsWithNullId.isNotEmpty) {
+        print('警告: IDがnullの地図が${mapsWithNullId.length}個見つかりました');
+        for (final map in mapsWithNullId) {
+          print('  - タイトル: ${map.title}, imagePath: ${map.imagePath}');
+        }
+      }
+
       setState(() {
         _maps = maps;
+        // 初期選択されたmapIdが実際の地図リストに存在するかチェック
+        if (_selectedMapId != null) {
+          final mapExists = _maps.any((map) => map.id == _selectedMapId);
+          print('選択されたMapIDが存在するか: $mapExists');
+          if (!mapExists) {
+            // 存在しない場合はnullに設定（「地図を選択しない」を選択）
+            print('選択されたMapIDが存在しないため、nullに設定します');
+            _selectedMapId = null;
+          }
+        }
       });
+      print('最終的な選択MapID: $_selectedMapId');
+      print(
+          '有効な地図数（IDがnullでない）: ${maps.where((map) => map.id != null).length}');
     } catch (e) {
       // エラーは無視（地図が存在しない場合もある）
+      print('地図の読み込みでエラーが発生しました: $e');
     }
   }
 
@@ -1038,6 +1068,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
             // 地図選択
             if (_maps.isNotEmpty) ...[
               DropdownButtonFormField<int?>(
+                key: ValueKey(_maps.length), // 地図リスト変更時に再構築
                 value: _selectedMapId,
                 decoration: const InputDecoration(
                   labelText: '地図',
@@ -1049,7 +1080,8 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                     value: null,
                     child: Text('地図を選択しない'),
                   ),
-                  ..._maps.map((map) {
+                  // IDがnullでない地図のみを表示
+                  ..._maps.where((map) => map.id != null).map((map) {
                     return DropdownMenuItem<int?>(
                       value: map.id,
                       child: Text(map.title),
@@ -1061,6 +1093,43 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                     _selectedMapId = value;
                   });
                 },
+              ),
+            ] else ...[
+              // 地図がない場合の表示
+              Container(
+                padding: const EdgeInsets.all(16.0),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(4.0),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '地図',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '使用可能な地図がありません',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '地図を作成してから記録を関連付けることができます',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
             const SizedBox(height: 24),
