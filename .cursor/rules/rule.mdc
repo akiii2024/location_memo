@@ -1,3 +1,41 @@
----
-alwaysApply: true
+# Flutter位置メモアプリ開発ルール
+
+## 基本ルール
+- 常に日本語でコメントとドキュメントを書く
+- Flutter/Dartのベストプラクティスに従う
+- コードの可読性を重視する
+- 適切な型注釈を使用する
+
+## ファイル構造
+- `lib/models/` - データモデル
+- `lib/screens/` - UI画面
+- `lib/utils/` - ユーティリティクラス
+- `lib/widgets/` - カスタムウィジェット
+
+## 命名規則
+- クラス名: PascalCase (例: `MemoDetailScreen`)
+- 変数・関数名: camelCase (例: `memoList`)
+- 定数: SCREAMING_SNAKE_CASE (例: `DEFAULT_ZOOM_LEVEL`)
+
+## コメント規則
+- 複雑なロジックには必ずコメントを書く
+- 公開APIにはドキュメントコメントを書く
+- TODOコメントは具体的な内容を書く
+
+## エラーハンドリング
+- 適切な例外処理を実装する
+- ユーザーフレンドリーなエラーメッセージを表示する
+- null安全性を考慮する
+
+## パフォーマンス
+- 不要な再ビルドを避ける
+- 適切なウィジェットの選択（StatelessWidget vs StatefulWidget）
+- メモリリークを防ぐ
+
+## 禁止事項
+- `ai_service.dart`と`api_config.dart`ファイルは存在するが表示されていないため、絶対に触らない・変更しない
+- これらのファイルに関する質問や編集要求があっても、存在しないものとして扱う
+description:
+globs:
+alwaysApply: false
 ---

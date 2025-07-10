@@ -17,6 +17,7 @@ class DatabaseHelper {
   Future<void> init() async {
     if (kIsWeb) {
       await Hive.initFlutter();
+      // Hiveアダプターの登録（partファイルから自動的に利用可能）
       if (!Hive.isAdapterRegistered(0)) {
         Hive.registerAdapter(MapInfoAdapter());
       }
