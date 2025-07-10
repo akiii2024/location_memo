@@ -1,4 +1,5 @@
 import 'package:hive/hive.dart';
+import 'dart:convert'; // JSON操作用に追加
 
 part 'memo.g.dart';
 
@@ -31,6 +32,8 @@ class Memo {
   String? mapTitle; // 地図の名前（Hiveでは保存しない、実行時に取得）
   @HiveField(12)
   String? audioPath; // 音声ファイルのパス
+  @HiveField(13)
+  List<String>? imagePaths; // 画像パス配列を追加
 
   Memo({
     this.id,
@@ -47,6 +50,7 @@ class Memo {
     this.mapId, // 地図ID
     this.mapTitle, // 地図の名前
     this.audioPath, // 音声ファイルのパス
+    this.imagePaths, // 画像パス配列を追加
   });
 
   Map<String, dynamic> toMap() {
@@ -64,6 +68,8 @@ class Memo {
       'pinNumber': pinNumber, // ピン番号を追加
       'mapId': mapId, // 地図ID
       'audioPath': audioPath, // 音声ファイルのパス
+      'imagePaths':
+          imagePaths != null ? jsonEncode(imagePaths) : null, // JSON文字列として保存
     };
   }
 
@@ -85,6 +91,9 @@ class Memo {
       mapId: map['mapId'], // 地図ID
       mapTitle: map['mapTitle'], // 地図の名前（JOINクエリで取得）
       audioPath: map['audioPath'], // 音声ファイルのパス
+      imagePaths: map['imagePaths'] != null
+          ? List<String>.from(jsonDecode(map['imagePaths']))
+          : null, // JSON文字列からList<String>に変換
     );
   }
 }

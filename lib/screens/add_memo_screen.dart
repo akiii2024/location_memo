@@ -7,6 +7,9 @@ import '../models/map_info.dart';
 import '../utils/database_helper.dart';
 import '../utils/ai_service.dart';
 import '../utils/audio_service.dart';
+import '../utils/image_helper.dart';
+import 'location_picker_screen.dart';
+import '../utils/default_values.dart';
 
 class AddMemoScreen extends StatefulWidget {
   final double? initialLatitude;
@@ -43,12 +46,15 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
   // AI機能用の状態変数
   bool _isAnalyzing = false;
-  File? _selectedImage;
+  File? _selectedImage; // AI分析用の一時的な画像（保持）
+  List<String> _imagePaths = []; // 保存済み画像パスのリスト
   String? _audioPath;
   bool _isRecording = false;
   bool _isPlaying = false;
+  bool _isTranscribing = false; // 音声文字起こし中のフラグ
 
   final List<String> _categories = [
+    'カテゴリを選択してください',
     '植物',
     '動物',
     '昆虫',
@@ -65,7 +71,9 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
     _longitude = widget.initialLongitude;
     _selectedMapId = widget.mapId; // 渡された地図IDを設定
     _discoveryTime = DateTime.now(); // デフォルトで現在時刻を設定
+    _selectedCategory = _categories[0]; // デフォルトで最初のカテゴリを選択
     _loadMaps();
+    _loadDefaultValues();
   }
 
   Future<void> _loadMaps() async {
@@ -79,29 +87,77 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
     }
   }
 
-  Future<void> _getCurrentLocation() async {
+  Future<void> _loadDefaultValues() async {
+    final values = await DefaultValues.getAllDefaultValues();
+    if (values['discoverer'] != null && values['discoverer']!.isNotEmpty) {
+      _discovererController.text = values['discoverer']!;
+    }
+    if (values['specimenNumberPrefix'] != null &&
+        values['specimenNumberPrefix']!.isNotEmpty) {
+      _specimenNumberController.text = values['specimenNumberPrefix']!;
+    }
+    if (values['category'] != null && values['category']!.isNotEmpty) {
+      if (_categories.contains(values['category'])) {
+        setState(() {
+          _selectedCategory = values['category'];
+        });
+      }
+    }
+    if (values['notes'] != null && values['notes']!.isNotEmpty) {
+      _notesController.text = values['notes']!;
+    }
+  }
+
+  Future<void> _selectLocation() async {
     setState(() {
       _isLocationLoading = true;
     });
 
     try {
-      // 位置情報機能を一時的に無効化
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('位置情報機能は現在無効化されています')),
+      // 利用可能な地図を取得
+      final maps = await DatabaseHelper.instance.readAllMaps();
+      MapInfo? selectedMap;
+
+      // デフォルトの地図を選択（選択された地図がある場合はそれを使用）
+      if (_selectedMapId != null && maps.isNotEmpty) {
+        selectedMap = maps.firstWhere(
+          (map) => map.id == _selectedMapId,
+          orElse: () => maps.first,
+        );
+      } else if (maps.isNotEmpty) {
+        selectedMap = maps.first;
+      }
+
+      final result = await Navigator.push<Map<String, double>>(
+        context,
+        MaterialPageRoute(
+          builder: (context) => LocationPickerScreen(
+            initialLatitude: _latitude,
+            initialLongitude: _longitude,
+            mapInfo: selectedMap,
+          ),
+        ),
       );
 
-      // デモ用の固定位置を設定
-      setState(() {
-        _latitude = 35.681236;
-        _longitude = 139.767125;
-      });
+      if (result != null) {
+        setState(() {
+          _latitude = result['latitude'];
+          _longitude = result['longitude'];
+        });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('デモ位置を設定しました')),
-      );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '位置を設定しました\n緯度: ${_latitude!.toStringAsFixed(6)}\n経度: ${_longitude!.toStringAsFixed(6)}',
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('位置情報の取得に失敗しました: $e')),
+        SnackBar(content: Text('位置選択中にエラーが発生しました: $e')),
       );
     } finally {
       setState(() {
@@ -142,6 +198,13 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
     if (_titleController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('タイトルを入力してください')),
+      );
+      return;
+    }
+
+    if (_selectedCategory == null || _selectedCategory == 'カテゴリを選択してください') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('カテゴリを選択してください')),
       );
       return;
     }
@@ -204,13 +267,15 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         specimenNumber: _specimenNumberController.text.trim().isEmpty
             ? null
             : _specimenNumberController.text.trim(),
-        category: _selectedCategory,
+        category:
+            _selectedCategory == 'カテゴリを選択してください' ? null : _selectedCategory,
         notes: _notesController.text.trim().isEmpty
             ? null
             : _notesController.text.trim(),
         pinNumber: nextPinNumber, // 自動的に次の番号を割り当て
         mapId: _selectedMapId, // 選択された地図ID
         audioPath: _audioPath, // 音声ファイルのパス
+        imagePaths: _imagePaths.isNotEmpty ? _imagePaths : null, // 画像パス配列
       );
 
       await DatabaseHelper.instance.create(memo);
@@ -240,6 +305,61 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
     return '${dateTime.year}/${dateTime.month.toString().padLeft(2, '0')}/${dateTime.day.toString().padLeft(2, '0')} ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
 
+  /// AI分析結果のカテゴリを既存のカテゴリリストにマッチング
+  String? _findMatchingCategory(String aiCategory) {
+    // 完全一致をチェック
+    if (_categories.contains(aiCategory)) {
+      return aiCategory;
+    }
+
+    // 小文字で比較（大文字小文字の違いを許容）
+    final lowerAiCategory = aiCategory.toLowerCase();
+    for (final category in _categories) {
+      if (category.toLowerCase() == lowerAiCategory) {
+        return category;
+      }
+    }
+
+    // 部分一致をチェック（キーワードベース）
+    final categoryMap = {
+      '植物': ['植物', '草', '木', '花', '葉', '樹', '草本', '木本', '藻類', '菌類', 'しょくぶつ'],
+      '動物': ['動物', '哺乳類', '鳥', '魚', '両生類', '爬虫類', 'どうぶつ'],
+      '昆虫': [
+        '昆虫',
+        '虫',
+        'チョウ',
+        '蝶',
+        'ガ',
+        '蛾',
+        '甲虫',
+        'ハチ',
+        '蜂',
+        'アリ',
+        '蟻',
+        'こんちゅう'
+      ],
+      '鉱物': ['鉱物', '岩石', '石', '結晶', 'こうぶつ'],
+      '化石': ['化石', 'かせき'],
+      '地形': ['地形', '地質', '地層', 'ちけい'],
+      'その他': ['その他', 'そのた', 'other']
+    };
+
+    for (final entry in categoryMap.entries) {
+      final categoryName = entry.key;
+      final keywords = entry.value;
+
+      for (final keyword in keywords) {
+        if (lowerAiCategory.contains(keyword.toLowerCase()) ||
+            keyword.toLowerCase().contains(lowerAiCategory)) {
+          return categoryName;
+        }
+      }
+    }
+
+    // マッチしない場合は「その他」を返す
+    return 'その他';
+  }
+
   // 画像を選択して分析
   Future<void> _pickAndAnalyzeImage() async {
     try {
@@ -259,28 +379,50 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
           try {
             final analysis = await AIService.analyzeImage(_selectedImage!);
 
-            // 分析結果をフィールドに自動入力
+            List<String> updatedFields = [];
+
+            // タイトルの自動入力
             if (analysis['title'] != null && analysis['title']!.isNotEmpty) {
               _titleController.text = analysis['title']!;
+              updatedFields.add('タイトル');
             }
+
+            // 内容の自動入力
             if (analysis['content'] != null &&
                 analysis['content']!.isNotEmpty) {
               _contentController.text = analysis['content']!;
-            }
-            if (analysis['category'] != null &&
-                _categories.contains(analysis['category'])) {
-              setState(() {
-                _selectedCategory = analysis['category'];
-              });
-            }
-            if (analysis['notes'] != null && analysis['notes']!.isNotEmpty) {
-              _notesController.text = analysis['notes']!;
+              updatedFields.add('内容');
             }
 
+            // カテゴリの自動選択（より柔軟なマッピング）
+            if (analysis['category'] != null) {
+              String? matchedCategory =
+                  _findMatchingCategory(analysis['category']!);
+              if (matchedCategory != null) {
+                setState(() {
+                  _selectedCategory = matchedCategory;
+                });
+                updatedFields.add('カテゴリ');
+              }
+            }
+
+            // 備考の自動入力
+            if (analysis['notes'] != null && analysis['notes']!.isNotEmpty) {
+              _notesController.text = analysis['notes']!;
+              updatedFields.add('備考');
+            }
+
+            // 更新されたフィールドの詳細なフィードバック
+            String message = updatedFields.isNotEmpty
+                ? 'AI分析完了！更新されたフィールド: ${updatedFields.join('、')}'
+                : 'AI分析は完了しましたが、自動入力できるデータがありませんでした。';
+
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('AI分析が完了しました！フィールドが自動入力されました。'),
-                backgroundColor: Colors.green,
+              SnackBar(
+                content: Text(message),
+                backgroundColor:
+                    updatedFields.isNotEmpty ? Colors.green : Colors.orange,
+                duration: const Duration(seconds: 4),
               ),
             );
           } catch (aiError) {
@@ -417,6 +559,162 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         ),
       );
     }
+  }
+
+  // 音声文字起こし
+  Future<void> _transcribeAudio() async {
+    if (_audioPath == null) return;
+
+    if (!AIService.isConfigured) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('AIサービスが設定されていません。設定画面でAPIキーを設定してください。'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isTranscribing = true;
+    });
+
+    try {
+      final transcribedText = await AIService.transcribeAudio(_audioPath!);
+
+      if (transcribedText != null && transcribedText.isNotEmpty) {
+        // 既存のコンテンツに追記する形で文字起こし結果を追加
+        final currentContent = _contentController.text.trim();
+        if (currentContent.isNotEmpty) {
+          _contentController.text =
+              '$currentContent\n\n【音声メモより】\n$transcribedText';
+        } else {
+          _contentController.text = transcribedText;
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('音声の文字起こしが完了しました！内容に追加されました。'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('音声の内容を認識できませんでした。'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      String errorMessage = '音声文字起こしでエラーが発生しました。';
+
+      if (e.toString().contains('503') ||
+          e.toString().contains('overloaded') ||
+          e.toString().contains('混雑')) {
+        errorMessage = 'AIサーバーが一時的に混雑しています。\nしばらく時間をおいてから再試行してください。';
+      } else if (e.toString().contains('429') || e.toString().contains('制限')) {
+        errorMessage = 'API使用回数制限に達しました。\nしばらく時間をおいてから再試行してください。';
+      } else if (e.toString().contains('401') ||
+          e.toString().contains('403') ||
+          e.toString().contains('認証')) {
+        errorMessage = 'AI機能の認証に失敗しました。\n設定画面でAPIキーを確認してください。';
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    } finally {
+      setState(() {
+        _isTranscribing = false;
+      });
+    }
+  }
+
+  // 画像を追加
+  Future<void> _addImage() async {
+    try {
+      final imagePath = await ImageHelper.pickAndSaveImage(context);
+      if (imagePath != null) {
+        setState(() {
+          _imagePaths.add(imagePath);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('画像を追加しました'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('画像の追加に失敗しました: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // 画像を削除
+  Future<void> _removeImage(int index) async {
+    if (index >= 0 && index < _imagePaths.length) {
+      final imagePath = _imagePaths[index];
+
+      // 確認ダイアログ
+      final shouldDelete = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('画像削除'),
+          content: const Text('この画像を削除しますか？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('キャンセル'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('削除'),
+            ),
+          ],
+        ),
+      );
+
+      if (shouldDelete == true) {
+        // ファイルを削除
+        await ImageHelper.deleteImage(imagePath);
+
+        // リストから削除
+        setState(() {
+          _imagePaths.removeAt(index);
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('画像を削除しました'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    }
+  }
+
+  // 画像を全て削除（画面を閉じる時のクリーンアップ用）
+  Future<void> _clearAllImages() async {
+    for (final imagePath in _imagePaths) {
+      await ImageHelper.deleteImage(imagePath);
+    }
+    _imagePaths.clear();
   }
 
   // AIアシスト機能
@@ -739,7 +1037,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
             // 地図選択
             if (_maps.isNotEmpty) ...[
-              DropdownButtonFormField<int>(
+              DropdownButtonFormField<int?>(
                 value: _selectedMapId,
                 decoration: const InputDecoration(
                   labelText: '地図',
@@ -747,12 +1045,12 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                   helperText: 'この記録を関連付ける地図を選択',
                 ),
                 items: [
-                  const DropdownMenuItem<int>(
+                  const DropdownMenuItem<int?>(
                     value: null,
                     child: Text('地図を選択しない'),
                   ),
                   ..._maps.map((map) {
-                    return DropdownMenuItem<int>(
+                    return DropdownMenuItem<int?>(
                       value: map.id,
                       child: Text(map.title),
                     );
@@ -845,6 +1143,24 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                           ),
                         ),
                       ),
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade100,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.blue.shade300),
+                        ),
+                        child: Text(
+                          'AI分析用の画像（この画像は保存されません）',
+                          style: TextStyle(
+                            color: Colors.blue.shade700,
+                            fontSize: 12,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
                     ],
 
                     const SizedBox(height: 12),
@@ -883,6 +1199,31 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                       ],
                     ),
 
+                    // 音声文字起こしボタン
+                    if (_audioPath != null) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _isTranscribing ? null : _transcribeAudio,
+                          icon: _isTranscribing
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.text_fields),
+                          label: Text(
+                              _isTranscribing ? '文字起こし中...' : '🤖 音声を文字起こし'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.purple,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+
                     if (_audioPath != null) ...[
                       const SizedBox(height: 8),
                       Container(
@@ -893,18 +1234,66 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(color: Colors.green.shade300),
                         ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.audiotrack,
+                                    color: Colors.green.shade700),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    '音声メモが録音されました',
+                                    style: TextStyle(
+                                      color: Colors.green.shade700,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '「音声を文字起こし」ボタンでAIによる自動文字起こしができます',
+                              style: TextStyle(
+                                color: Colors.green.shade600,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    if (_isTranscribing) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.purple.shade100,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.purple.shade300),
+                        ),
                         child: Row(
                           children: [
-                            Icon(Icons.audiotrack,
-                                color: Colors.green.shade700),
+                            SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.purple.shade700,
+                              ),
+                            ),
                             const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                '音声メモが録音されました',
-                                style: TextStyle(
-                                  color: Colors.green.shade700,
-                                  fontSize: 12,
-                                ),
+                            Text(
+                              '音声を文字起こし中...',
+                              style: TextStyle(
+                                color: Colors.purple.shade700,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
                           ],
@@ -945,6 +1334,156 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
             ),
             const SizedBox(height: 16),
 
+            // 画像管理セクション
+            Card(
+              color: Colors.green.shade50,
+              child: Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.photo_library, color: Colors.green.shade700),
+                        const SizedBox(width: 8),
+                        Text(
+                          '画像添付 (${_imagePaths.length}枚)',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green.shade700,
+                          ),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          onPressed: _addImage,
+                          icon: const Icon(Icons.add_photo_alternate,
+                              color: Colors.green),
+                          tooltip: '画像を追加',
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'メモに関連する画像を複数枚添付できます',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    if (_imagePaths.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        height: 120,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _imagePaths.length,
+                          itemBuilder: (context, index) {
+                            final imagePath = _imagePaths[index];
+                            return Container(
+                              width: 120,
+                              margin: const EdgeInsets.only(right: 8),
+                              child: Stack(
+                                children: [
+                                  // 画像
+                                  Container(
+                                    width: 120,
+                                    height: 120,
+                                    decoration: BoxDecoration(
+                                      border: Border.all(
+                                          color: Colors.grey.shade300),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: ImageHelper.buildImageWidget(
+                                        imagePath,
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
+                                  ),
+                                  // 削除ボタン
+                                  Positioned(
+                                    top: 4,
+                                    right: 4,
+                                    child: GestureDetector(
+                                      onTap: () => _removeImage(index),
+                                      child: Container(
+                                        width: 24,
+                                        height: 24,
+                                        decoration: BoxDecoration(
+                                          color: Colors.red,
+                                          borderRadius:
+                                              BorderRadius.circular(12),
+                                        ),
+                                        child: const Icon(
+                                          Icons.close,
+                                          color: Colors.white,
+                                          size: 16,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  // 画像番号
+                                  Positioned(
+                                    bottom: 4,
+                                    left: 4,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black54,
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Text(
+                                        '${index + 1}',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ] else ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        height: 60,
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                              color: Colors.grey.shade300,
+                              style: BorderStyle.solid),
+                          borderRadius: BorderRadius.circular(8),
+                          color: Colors.grey.shade50,
+                        ),
+                        child: InkWell(
+                          onTap: _addImage,
+                          borderRadius: BorderRadius.circular(8),
+                          child: const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.add_photo_alternate,
+                                  size: 24, color: Colors.grey),
+                              SizedBox(height: 4),
+                              Text(
+                                'タップして画像を追加',
+                                style:
+                                    TextStyle(color: Colors.grey, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
             TextField(
               controller: _notesController,
               decoration: const InputDecoration(
@@ -972,12 +1511,12 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text(
-                          '現在の位置情報',
+                          '位置情報',
                           style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                         ElevatedButton.icon(
                           onPressed:
-                              _isLocationLoading ? null : _getCurrentLocation,
+                              _isLocationLoading ? null : _selectLocation,
                           icon: _isLocationLoading
                               ? const SizedBox(
                                   width: 16,
@@ -985,21 +1524,21 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                                   child:
                                       CircularProgressIndicator(strokeWidth: 2),
                                 )
-                              : const Icon(Icons.location_on),
-                          label: const Text('現在位置'),
+                              : const Icon(Icons.map),
+                          label: const Text('位置設定'),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8.0),
                     if (_latitude != null && _longitude != null)
                       Text(
-                        '保存される位置：\n緯度: ${_latitude!.toStringAsFixed(6)}\n経度: ${_longitude!.toStringAsFixed(6)}',
+                        '設定された位置：\n緯度: ${_latitude!.toStringAsFixed(6)}\n経度: ${_longitude!.toStringAsFixed(6)}',
                         style: const TextStyle(fontSize: 12),
                       )
                     else
                       const Text(
-                        '位置情報が設定されていません',
-                        style: TextStyle(color: Colors.grey),
+                        '位置情報が設定されていません\n「位置設定」ボタンから地図で位置を選択してください',
+                        style: TextStyle(color: Colors.grey, fontSize: 12),
                       ),
                   ],
                 ),
@@ -1071,7 +1610,9 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                     '• カテゴリ: ${_selectedCategory ?? "未選択"}\n'
                     '• 発見日時: ${_formatDateTime(_discoveryTime)}\n'
                     '• 発見者: ${_discovererController.text.trim().isEmpty ? "未入力" : _discovererController.text.trim()}\n'
-                    '• 位置情報: ${_latitude != null && _longitude != null ? "設定済み" : "未設定"}',
+                    '• 位置情報: ${_latitude != null && _longitude != null ? "設定済み" : "未設定"}\n'
+                    '• 添付画像: ${_imagePaths.length}枚\n'
+                    '• 音声メモ: ${_audioPath != null ? "録音済み (文字起こし可能)" : "なし"}',
                     style: TextStyle(
                       fontSize: 12,
                       color: Colors.grey.shade700,
@@ -1094,6 +1635,8 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
     _specimenNumberController.dispose();
     _notesController.dispose();
     AudioService.dispose(); // AudioServiceのリソース解放
+    // 保存されていない画像をクリーンアップ（メモ保存が完了していない場合のみ）
+    // Note: 実際の実装では、画面を閉じる前に保存確認が必要
     super.dispose();
   }
 }

@@ -39,7 +39,7 @@ class DatabaseHelper {
     final path = join(dbPath, filePath);
 
     return await openDatabase(path,
-        version: 6, onCreate: _createDB, onUpgrade: _upgradeDB);
+        version: 7, onCreate: _createDB, onUpgrade: _upgradeDB);
   }
 
   Future _createDB(Database db, int version) async {
@@ -63,7 +63,8 @@ CREATE TABLE memos (
   notes $textNullType,
   mapId $intType,
   pinNumber $intType,
-  audioPath $textNullType
+  audioPath $textNullType,
+  imagePaths $textNullType
 )
 ''');
 
@@ -102,6 +103,9 @@ CREATE TABLE maps (
     if (oldVersion < 6) {
       await db.execute('ALTER TABLE memos ADD COLUMN audioPath TEXT');
     }
+    if (oldVersion < 7) {
+      await db.execute('ALTER TABLE memos ADD COLUMN imagePaths TEXT');
+    }
   }
 
   Future<Memo> create(Memo memo) async {
@@ -122,6 +126,7 @@ CREATE TABLE maps (
         pinNumber: memo.pinNumber,
         mapId: memo.mapId,
         audioPath: memo.audioPath,
+        imagePaths: memo.imagePaths,
       );
     } else {
       final db = await instance.database;
@@ -170,7 +175,8 @@ CREATE TABLE maps (
           'notes',
           'mapId',
           'pinNumber',
-          'audioPath'
+          'audioPath',
+          'imagePaths'
         ],
         where: 'id = ?',
         whereArgs: [id],
@@ -598,6 +604,26 @@ CREATE TABLE maps (
         where: 'id = ?',
         whereArgs: [id],
       );
+    }
+  }
+
+  Future<void> deleteAllMemos() async {
+    if (kIsWeb) {
+      await init();
+      await _memoBox!.clear();
+    } else {
+      final db = await instance.database;
+      await db.delete('memos');
+    }
+  }
+
+  Future<void> deleteAllMaps() async {
+    if (kIsWeb) {
+      await init();
+      await _mapBox!.clear();
+    } else {
+      final db = await instance.database;
+      await db.delete('maps');
     }
   }
 

@@ -33,6 +33,8 @@ class _PinListScreenState extends State<PinListScreen> {
   @override
   void initState() {
     super.initState();
+    _selectedCategory = 'すべて'; // デフォルトで「すべて」を選択
+    _selectedMap = 'すべて'; // デフォルトで「すべて」を選択
     _loadData();
   }
 

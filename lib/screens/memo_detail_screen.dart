@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../models/memo.dart';
+import '../models/map_info.dart';
 import '../utils/database_helper.dart';
+import '../utils/image_helper.dart';
+import 'location_picker_screen.dart';
 
 class MemoDetailScreen extends StatefulWidget {
   final Memo memo;
@@ -21,8 +24,12 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
   bool _isEditing = false;
   DateTime? _discoveryTime;
   String? _selectedCategory;
+  double? _editingLatitude;
+  double? _editingLongitude;
+  bool _isLocationLoading = false;
 
   final List<String> _categories = [
+    'カテゴリを選択してください',
     '植物',
     '動物',
     '昆虫',
@@ -43,7 +50,17 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
         TextEditingController(text: widget.memo.specimenNumber ?? '');
     _notesController = TextEditingController(text: widget.memo.notes ?? '');
     _discoveryTime = widget.memo.discoveryTime;
-    _selectedCategory = widget.memo.category;
+    // カテゴリがnullの場合や、リストに含まれていない場合はデフォルト値を設定
+    // 必ず_categoriesに含まれる値を設定する
+    if (widget.memo.category != null &&
+        _categories.contains(widget.memo.category)) {
+      _selectedCategory = widget.memo.category;
+    } else {
+      _selectedCategory = _categories[0]; // 'カテゴリを選択してください'
+    }
+    // 編集用位置情報を初期化
+    _editingLatitude = widget.memo.latitude;
+    _editingLongitude = widget.memo.longitude;
   }
 
   Future<void> _selectDateTime() async {
@@ -77,6 +94,64 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
   String _formatDateTime(DateTime? dateTime) {
     if (dateTime == null) return '未設定';
     return '${dateTime.year}/${dateTime.month.toString().padLeft(2, '0')}/${dateTime.day.toString().padLeft(2, '0')} ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _selectLocation() async {
+    setState(() {
+      _isLocationLoading = true;
+    });
+
+    try {
+      // 利用可能な地図を取得
+      final maps = await DatabaseHelper.instance.readAllMaps();
+      MapInfo? selectedMap;
+
+      // 現在のメモの地図IDまたはデフォルトの地図を選択
+      if (widget.memo.mapId != null && maps.isNotEmpty) {
+        selectedMap = maps.firstWhere(
+          (map) => map.id == widget.memo.mapId,
+          orElse: () => maps.first,
+        );
+      } else if (maps.isNotEmpty) {
+        selectedMap = maps.first;
+      }
+
+      final result = await Navigator.push<Map<String, double>>(
+        context,
+        MaterialPageRoute(
+          builder: (context) => LocationPickerScreen(
+            initialLatitude: _editingLatitude,
+            initialLongitude: _editingLongitude,
+            mapInfo: selectedMap,
+          ),
+        ),
+      );
+
+      if (result != null) {
+        setState(() {
+          _editingLatitude = result['latitude'];
+          _editingLongitude = result['longitude'];
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '位置を更新しました\n緯度: ${_editingLatitude!.toStringAsFixed(6)}\n経度: ${_editingLongitude!.toStringAsFixed(6)}',
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('位置選択中にエラーが発生しました: $e')),
+      );
+    } finally {
+      setState(() {
+        _isLocationLoading = false;
+      });
+    }
   }
 
   // ピン番号編集ダイアログを表示
@@ -317,6 +392,122 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
             const SizedBox(height: 16),
           ],
 
+          // 添付画像
+          if (widget.memo.imagePaths != null &&
+              widget.memo.imagePaths!.isNotEmpty) ...[
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.photo_library,
+                            size: 16, color: Colors.grey),
+                        const SizedBox(width: 8),
+                        Text(
+                          '添付画像 (${widget.memo.imagePaths!.length}枚)',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      height: 120,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: widget.memo.imagePaths!.length,
+                        itemBuilder: (context, index) {
+                          final imagePath = widget.memo.imagePaths![index];
+                          return Container(
+                            width: 120,
+                            margin: const EdgeInsets.only(right: 8),
+                            child: Stack(
+                              children: [
+                                // 画像
+                                Container(
+                                  width: 120,
+                                  height: 120,
+                                  decoration: BoxDecoration(
+                                    border:
+                                        Border.all(color: Colors.grey.shade300),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        // 画像をフルスクリーンで表示
+                                        showDialog(
+                                          context: context,
+                                          builder: (context) => Dialog(
+                                            backgroundColor: Colors.black,
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                AppBar(
+                                                  backgroundColor: Colors.black,
+                                                  foregroundColor: Colors.white,
+                                                  title:
+                                                      Text('画像 ${index + 1}'),
+                                                ),
+                                                Expanded(
+                                                  child: Center(
+                                                    child: ImageHelper
+                                                        .buildImageWidget(
+                                                      imagePath,
+                                                      fit: BoxFit.contain,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                      child: ImageHelper.buildImageWidget(
+                                        imagePath,
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                // 画像番号
+                                Positioned(
+                                  bottom: 4,
+                                  left: 4,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black54,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text(
+                                      '${index + 1}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
           // 位置情報
           if (widget.memo.latitude != null &&
               widget.memo.longitude != null) ...[
@@ -343,6 +534,7 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                 ),
               ),
             ),
+            const SizedBox(height: 16),
           ],
         ],
       ),
@@ -371,20 +563,33 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
 
           // カテゴリ選択
           DropdownButtonFormField<String>(
-            value: _selectedCategory,
+            value: _selectedCategory ?? _categories[0],
             decoration: const InputDecoration(
               labelText: 'カテゴリ',
               border: OutlineInputBorder(),
             ),
-            items: _categories.map((category) {
-              return DropdownMenuItem(
-                value: category,
-                child: Text(category),
-              );
-            }).toList(),
+            items: () {
+              // デバッグ用：valueとitemsの値をコンソールに出力
+              print('=== DropdownButton Debug Info ===');
+              print('Selected value: ${_selectedCategory ?? _categories[0]}');
+              print('Available categories:');
+              for (int i = 0; i < _categories.length; i++) {
+                print('  [$i]: ${_categories[i]}');
+              }
+              print('===============================');
+
+              return _categories.map((category) {
+                return DropdownMenuItem(
+                  value: category,
+                  child: Text(category),
+                );
+              }).toList();
+            }(),
             onChanged: (value) {
               setState(() {
-                _selectedCategory = value;
+                if (value != null) {
+                  _selectedCategory = value;
+                }
               });
             },
           ),
@@ -453,30 +658,150 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
           ),
           const SizedBox(height: 24),
 
-          // 位置情報（読み取り専用）
-          if (widget.memo.latitude != null &&
-              widget.memo.longitude != null) ...[
-            const Text('位置情報',
+          // 添付画像（読み取り専用）
+          if (widget.memo.imagePaths != null &&
+              widget.memo.imagePaths!.isNotEmpty) ...[
+            const Text('添付画像',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             Card(
+              color: Colors.grey.shade50,
               child: Padding(
-                padding: const EdgeInsets.all(16.0),
+                padding: const EdgeInsets.all(12.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('位置情報（読み取り専用）',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, color: Colors.grey)),
+                    Row(
+                      children: [
+                        const Icon(Icons.photo_library, color: Colors.grey),
+                        const SizedBox(width: 8),
+                        Text(
+                          '添付画像 (${widget.memo.imagePaths!.length}枚)',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 8),
-                    Text(
-                        '緯度: ${widget.memo.latitude!.toStringAsFixed(6)}\n経度: ${widget.memo.longitude!.toStringAsFixed(6)}'),
+                    const Text(
+                      '注意: 画像の編集機能は現在利用できません',
+                      style: TextStyle(fontSize: 12, color: Colors.orange),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      height: 100,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: widget.memo.imagePaths!.length,
+                        itemBuilder: (context, index) {
+                          final imagePath = widget.memo.imagePaths![index];
+                          return Container(
+                            width: 100,
+                            margin: const EdgeInsets.only(right: 8),
+                            child: Stack(
+                              children: [
+                                Container(
+                                  width: 100,
+                                  height: 100,
+                                  decoration: BoxDecoration(
+                                    border:
+                                        Border.all(color: Colors.grey.shade300),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: ImageHelper.buildImageWidget(
+                                      imagePath,
+                                      fit: BoxFit.cover,
+                                    ),
+                                  ),
+                                ),
+                                Positioned(
+                                  bottom: 4,
+                                  left: 4,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 4, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black54,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      '${index + 1}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
                   ],
                 ),
               ),
             ),
             const SizedBox(height: 24),
           ],
+
+          // 位置情報
+          const Text('位置情報',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        '位置情報',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      ElevatedButton.icon(
+                        onPressed: _isLocationLoading ? null : _selectLocation,
+                        icon: _isLocationLoading
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.map),
+                        label: const Text('位置編集'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  if (_editingLatitude != null && _editingLongitude != null)
+                    Text(
+                      '設定された位置：\n緯度: ${_editingLatitude!.toStringAsFixed(6)}\n経度: ${_editingLongitude!.toStringAsFixed(6)}',
+                      style: const TextStyle(fontSize: 12),
+                    )
+                  else
+                    const Text(
+                      '位置情報が設定されていません\n「位置編集」ボタンから地図で位置を選択してください',
+                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
 
           // 保存ボタン
           SizedBox(
@@ -494,8 +819,8 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                   id: widget.memo.id,
                   title: _titleController.text.trim(),
                   content: _contentController.text.trim(),
-                  latitude: widget.memo.latitude,
-                  longitude: widget.memo.longitude,
+                  latitude: _editingLatitude,
+                  longitude: _editingLongitude,
                   discoveryTime: _discoveryTime,
                   discoverer: _discovererController.text.trim().isEmpty
                       ? null
@@ -503,11 +828,16 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                   specimenNumber: _specimenNumberController.text.trim().isEmpty
                       ? null
                       : _specimenNumberController.text.trim(),
-                  category: _selectedCategory,
+                  category: _selectedCategory == 'カテゴリを選択してください'
+                      ? null
+                      : _selectedCategory,
                   notes: _notesController.text.trim().isEmpty
                       ? null
                       : _notesController.text.trim(),
                   pinNumber: widget.memo.pinNumber, // ピン番号を保持
+                  mapId: widget.memo.mapId, // 地図IDを保持
+                  audioPath: widget.memo.audioPath, // 音声パスを保持
+                  imagePaths: widget.memo.imagePaths, // 画像パスを保持
                 );
 
                 await DatabaseHelper.instance.update(updatedMemo);
@@ -547,7 +877,16 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                       widget.memo.specimenNumber ?? '';
                   _notesController.text = widget.memo.notes ?? '';
                   _discoveryTime = widget.memo.discoveryTime;
-                  _selectedCategory = widget.memo.category;
+                  // カテゴリの値を安全に設定
+                  if (widget.memo.category != null &&
+                      _categories.contains(widget.memo.category)) {
+                    _selectedCategory = widget.memo.category;
+                  } else {
+                    _selectedCategory = _categories[0];
+                  }
+                  // 編集用位置情報もリセット
+                  _editingLatitude = widget.memo.latitude;
+                  _editingLongitude = widget.memo.longitude;
                 });
               },
             ),
