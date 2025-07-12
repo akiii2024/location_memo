@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 // import 'package:geolocator/geolocator.dart';  // 一時的に無効化
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
@@ -508,6 +508,11 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
             );
           } catch (aiError) {
             // AI分析エラーの詳細な処理
+            print('AddMemo Debug: AI分析エラー詳細:');
+            print('AddMemo Debug: エラータイプ: ${aiError.runtimeType}');
+            print('AddMemo Debug: エラーメッセージ: $aiError');
+            print('AddMemo Debug: エラートレース: ${StackTrace.current}');
+
             String errorMessage = '画像分析中にエラーが発生しました。';
 
             if (aiError.toString().contains('503') ||
@@ -523,9 +528,43 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text(errorMessage),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(errorMessage),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'デバッグ情報:',
+                            style: TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                          Text('• エラータイプ: ${aiError.runtimeType}',
+                              style: const TextStyle(fontSize: 10)),
+                          Text('• Web環境: ${kIsWeb}',
+                              style: const TextStyle(fontSize: 10)),
+                          Text('• APIキー設定: ${AIService.isConfigured}',
+                              style: const TextStyle(fontSize: 10)),
+                          if (kIsWeb) ...[
+                            Text('• HTTPS接続: ${Uri.base.scheme == 'https'}',
+                                style: const TextStyle(fontSize: 10)),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
                 backgroundColor: Colors.orange,
-                duration: const Duration(seconds: 5),
+                duration: const Duration(seconds: 8),
               ),
             );
           }
@@ -708,6 +747,11 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         );
       }
     } catch (e) {
+      print('AddMemo Debug: 音声文字起こしエラー詳細:');
+      print('AddMemo Debug: エラータイプ: ${e.runtimeType}');
+      print('AddMemo Debug: エラーメッセージ: $e');
+      print('AddMemo Debug: エラートレース: ${StackTrace.current}');
+
       String errorMessage = '音声文字起こしでエラーが発生しました。';
 
       if (e.toString().contains('503') ||
@@ -724,9 +768,43 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(errorMessage),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(errorMessage),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'デバッグ情報:',
+                      style:
+                          TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                    Text('• エラータイプ: ${e.runtimeType}',
+                        style: const TextStyle(fontSize: 10)),
+                    Text('• Web環境: ${kIsWeb}',
+                        style: const TextStyle(fontSize: 10)),
+                    Text('• APIキー設定: ${AIService.isConfigured}',
+                        style: const TextStyle(fontSize: 10)),
+                    if (kIsWeb) ...[
+                      Text('• HTTPS接続: ${Uri.base.scheme == 'https'}',
+                          style: const TextStyle(fontSize: 10)),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
           backgroundColor: Colors.red,
-          duration: const Duration(seconds: 5),
+          duration: const Duration(seconds: 8),
         ),
       );
     } finally {
@@ -914,10 +992,50 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         ),
       );
     } catch (e) {
+      print('AddMemo Debug: テキスト改善エラー詳細:');
+      print('AddMemo Debug: エラータイプ: ${e.runtimeType}');
+      print('AddMemo Debug: エラーメッセージ: $e');
+      print('AddMemo Debug: エラートレース: ${StackTrace.current}');
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('改善提案の生成に失敗しました: $e'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('改善提案の生成に失敗しました: $e'),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'デバッグ情報:',
+                      style:
+                          TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                    Text('• エラータイプ: ${e.runtimeType}',
+                        style: const TextStyle(fontSize: 10)),
+                    Text('• Web環境: ${kIsWeb}',
+                        style: const TextStyle(fontSize: 10)),
+                    Text('• APIキー設定: ${AIService.isConfigured}',
+                        style: const TextStyle(fontSize: 10)),
+                    if (kIsWeb) ...[
+                      Text('• HTTPS接続: ${Uri.base.scheme == 'https'}',
+                          style: const TextStyle(fontSize: 10)),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
           backgroundColor: Colors.red,
+          duration: const Duration(seconds: 8),
         ),
       );
     } finally {
@@ -978,10 +1096,52 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                     ),
                   );
                 } catch (e) {
+                  print('AddMemo Debug: 質問応答エラー詳細:');
+                  print('AddMemo Debug: エラータイプ: ${e.runtimeType}');
+                  print('AddMemo Debug: エラーメッセージ: $e');
+                  print('AddMemo Debug: エラートレース: ${StackTrace.current}');
+
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('回答の生成に失敗しました: $e'),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('回答の生成に失敗しました: $e'),
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'デバッグ情報:',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                                Text('• エラータイプ: ${e.runtimeType}',
+                                    style: const TextStyle(fontSize: 10)),
+                                Text('• Web環境: ${kIsWeb}',
+                                    style: const TextStyle(fontSize: 10)),
+                                Text('• APIキー設定: ${AIService.isConfigured}',
+                                    style: const TextStyle(fontSize: 10)),
+                                if (kIsWeb) ...[
+                                  Text(
+                                      '• HTTPS接続: ${Uri.base.scheme == 'https'}',
+                                      style: const TextStyle(fontSize: 10)),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                       backgroundColor: Colors.red,
+                      duration: const Duration(seconds: 8),
                     ),
                   );
                 } finally {

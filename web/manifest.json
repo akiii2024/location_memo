@@ -6,7 +6,6 @@
     "background_color": "#ffffff",
     "theme_color": "#2196f3",
     "description": "位置情報付きメモアプリ - 場所とメモを簡単に記録・管理",
-    "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
         {

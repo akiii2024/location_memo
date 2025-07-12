@@ -10,6 +10,7 @@ import '../utils/backup_service.dart';
 import '../utils/database_helper.dart';
 import '../utils/default_values.dart';
 import '../models/map_info.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -637,21 +638,57 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     try {
+      print('Settings Debug: API接続テスト開始');
       final isConnected = await AIService.testApiConnection();
+      print('Settings Debug: API接続テスト結果: $isConnected');
 
       if (mounted) {
         showDialog(
           context: context,
           builder: (context) => AlertDialog(
             title: Text(isConnected ? '✅ 接続成功' : '❌ 接続失敗'),
-            content: Text(isConnected
-                ? 'AIサービスに正常に接続できました。画像分析機能が利用可能です。'
-                : 'AIサービスへの接続に失敗しました。\n\n'
-                    '考えられる原因:\n'
-                    '• APIキーが無効または期限切れ\n'
-                    '• ネットワーク接続の問題\n'
-                    '• サーバーが一時的に利用不可\n\n'
-                    'しばらく時間をおいてから再試行してください。'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(isConnected
+                    ? 'AIサービスに正常に接続できました。画像分析機能が利用可能です。'
+                    : 'AIサービスへの接続に失敗しました。\n\n'
+                        '考えられる原因:\n'
+                        '• APIキーが無効または期限切れ\n'
+                        '• ネットワーク接続の問題\n'
+                        '• サーバーが一時的に利用不可\n\n'
+                        'しばらく時間をおいてから再試行してください。'),
+                if (!isConnected) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.orange.shade200),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'デバッグ情報:',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        Text('• プラットフォーム: ${Theme.of(context).platform}'),
+                        Text('• Web環境: ${kIsWeb}'),
+                        Text('• APIキー設定: ${AIService.isConfigured}'),
+                        if (kIsWeb) ...[
+                          Text('• 現在のURL: ${Uri.base}'),
+                          Text('• HTTPS接続: ${Uri.base.scheme == 'https'}'),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
@@ -662,13 +699,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     } catch (e) {
+      print('Settings Debug: API接続テストエラー: $e');
       if (mounted) {
         showDialog(
           context: context,
           builder: (context) => AlertDialog(
             title: const Text('❌ 接続エラー'),
-            content: Text('API接続テスト中にエラーが発生しました:\n\n$e\n\n'
-                'APIキーの設定とネットワーク接続を確認してください。'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('API接続テスト中にエラーが発生しました:\n\n$e\n\n'
+                    'APIキーの設定とネットワーク接続を確認してください。'),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red.shade200),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'エラー詳細:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      Text('• エラータイプ: ${e.runtimeType}'),
+                      Text('• プラットフォーム: ${Theme.of(context).platform}'),
+                      Text('• Web環境: ${kIsWeb}'),
+                      Text('• APIキー設定: ${AIService.isConfigured}'),
+                      if (kIsWeb) ...[
+                        Text('• 現在のURL: ${Uri.base}'),
+                        Text('• HTTPS接続: ${Uri.base.scheme == 'https'}'),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),

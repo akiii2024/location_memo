@@ -19,7 +19,7 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="位置情報付きメモアプリ - 場所とメモを簡単に記録・管理">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
 
   <!-- PWA meta tags -->
   <meta name="theme-color" content="#2196f3">
@@ -28,6 +28,8 @@
   <meta name="apple-mobile-web-app-title" content="Location Memo">
   <meta name="msapplication-TileColor" content="#2196f3">
   <meta name="msapplication-tap-highlight" content="no">
+  <!-- PWA表示モードでの最適化 -->
+  <meta name="mobile-web-app-capable" content="yes">
 
   <!-- iOS meta tags & icons -->
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
@@ -37,6 +39,33 @@
 
   <title>Location Memo</title>
   <link rel="manifest" href="manifest.json">
+  
+  <!-- PWA表示最適化用CSS -->
+  <style>
+    /* PWA環境での表示最適化 */
+    @media (display-mode: standalone) {
+      body {
+        /* PWAモードでの安全領域確保 */
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-top: env(safe-area-inset-top);
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+      }
+      
+      /* フローティング要素の調整 */
+      .floating-action-button {
+        bottom: calc(env(safe-area-inset-bottom) + 16px);
+      }
+    }
+    
+    /* モバイルブラウザでの最適化 */
+    @media (max-width: 768px) {
+      body {
+        /* モバイルでの安全領域確保 */
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+    }
+  </style>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
