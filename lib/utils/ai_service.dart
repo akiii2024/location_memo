@@ -5,6 +5,7 @@ import 'package:google_generative_ai/google_generative_ai.dart';
 import '../models/memo.dart';
 import 'api_config.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:http/http.dart' as http;
 
 class AIService {
   static const String _apiKey = ApiConfig.geminiApiKey; // APIキーをここに設定
@@ -57,6 +58,54 @@ class AIService {
     }
   }
 
+  /// Web環境でのHTTP直接リクエスト（フォールバック）
+  static Future<String?> _makeDirectApiRequest(String prompt) async {
+    if (!kIsWeb) return null;
+
+    try {
+      print('AI Service Debug: Web環境でHTTP直接リクエスト開始');
+
+      final url = Uri.parse(
+          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$_apiKey');
+
+      final requestBody = {
+        'contents': [
+          {
+            'parts': [
+              {'text': prompt}
+            ]
+          }
+        ]
+      };
+
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: json.encode(requestBody),
+      );
+
+      print('AI Service Debug: HTTP直接リクエスト レスポンス状態: ${response.statusCode}');
+      print('AI Service Debug: HTTP直接リクエスト レスポンス本文: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        final text =
+            responseData['candidates']?[0]?['content']?['parts']?[0]?['text'];
+        print('AI Service Debug: HTTP直接リクエスト 成功: $text');
+        return text;
+      } else {
+        print(
+            'AI Service Debug: HTTP直接リクエスト 失敗: ${response.statusCode} - ${response.body}');
+        return null;
+      }
+    } catch (e) {
+      print('AI Service Debug: HTTP直接リクエスト エラー: $e');
+      return null;
+    }
+  }
+
   /// API接続テスト
   static Future<bool> testApiConnection() async {
     print('AI Service Debug: API接続テスト開始');
@@ -65,6 +114,13 @@ class AIService {
     if (!isConfigured) {
       print('AI Service Debug: API接続テスト失敗 - 設定されていません');
       return false;
+    }
+
+    // Web環境では直接HTTPリクエストを試行
+    if (kIsWeb) {
+      print('AI Service Debug: Web環境でHTTP直接リクエストを試行');
+      final result = await _makeDirectApiRequest('こんにちは');
+      return result != null && result.isNotEmpty;
     }
 
     try {
@@ -96,6 +152,13 @@ class AIService {
         print('AI Service Debug: Web環境でのエラー情報:');
         print('AI Service Debug: 現在のURL: ${Uri.base}');
         print('AI Service Debug: HTTPS接続: ${Uri.base.scheme == 'https'}');
+
+        // minified:KRエラーの場合、HTTPリクエストを試行
+        if (e.toString().contains('minified:') || e.toString().contains('KR')) {
+          print('AI Service Debug: minified:KRエラー検出、HTTP直接リクエストを試行');
+          final result = await _makeDirectApiRequest('こんにちは');
+          return result != null && result.isNotEmpty;
+        }
       }
 
       return false;
@@ -110,6 +173,13 @@ class AIService {
     if (!isConfigured) {
       print('AI Service Debug: 音声文字起こし失敗 - 設定されていません');
       throw Exception('AIサービスが設定されていません。設定画面でAPIキーを設定してください。');
+    }
+
+    // Web環境では音声ファイルの処理が制限されているため、エラーメッセージを返す
+    if (kIsWeb) {
+      print('AI Service Debug: Web環境では音声文字起こしは制限されています');
+      throw Exception(
+          'Web環境では音声文字起こし機能は制限されています。\n\nモバイルアプリまたはデスクトップアプリをご利用ください。');
     }
 
     try {
@@ -200,6 +270,13 @@ class AIService {
         'category': null,
         'notes': null,
       };
+    }
+
+    // Web環境では画像ファイルの処理が制限されているため、エラーメッセージを返す
+    if (kIsWeb) {
+      print('AI Service Debug: Web環境では画像分析は制限されています');
+      throw Exception(
+          'Web環境では画像分析機能は制限されています。\n\nモバイルアプリまたはデスクトップアプリをご利用ください。\n\n代替案：\n• 画像を見ながら手動でメモを作成\n• テキスト改善機能を活用');
     }
 
     try {
@@ -338,15 +415,7 @@ class AIService {
       return currentContent;
     }
 
-    try {
-      final model = _model;
-      if (model == null) {
-        print('AI Service Debug: テキスト改善失敗 - モデルがnull');
-        throw Exception('AIモデルの初期化に失敗しました。');
-      }
-
-      print('AI Service Debug: Gemini APIにテキスト改善リクエスト送信中...');
-      final prompt = Content.text('''
+    final prompt = '''
 以下の自然観察記録の内容を、より詳細で科学的な観察記録になるように改善してください。
 観察の精度を高め、専門的な視点も加えつつ、読みやすい文章にしてください。
 
@@ -358,9 +427,29 @@ $currentContent
 - 科学的な記述の補強
 - 構造化された記録形式
 - 今後の観察で注意すべき点の提案
-''');
+''';
 
-      final response = await model.generateContent([prompt]);
+    // Web環境では直接HTTPリクエストを試行
+    if (kIsWeb) {
+      print('AI Service Debug: Web環境でHTTP直接リクエストを試行');
+      final result = await _makeDirectApiRequest(prompt);
+      if (result != null && result.isNotEmpty) {
+        print('AI Service Debug: テキスト改善成功（HTTP直接）');
+        return result.trim();
+      }
+    }
+
+    try {
+      final model = _model;
+      if (model == null) {
+        print('AI Service Debug: テキスト改善失敗 - モデルがnull');
+        throw Exception('AIモデルの初期化に失敗しました。');
+      }
+
+      print('AI Service Debug: Gemini APIにテキスト改善リクエスト送信中...');
+      final response = await model.generateContent([
+        Content.text(prompt),
+      ]);
 
       print('AI Service Debug: テキスト改善レスポンス受信');
       print('AI Service Debug: レスポンステキスト: ${response.text}');
@@ -377,6 +466,17 @@ $currentContent
       print('AI Service Debug: エラータイプ: ${e.runtimeType}');
       print('AI Service Debug: エラーメッセージ: $e');
       print('AI Service Debug: エラートレース: ${StackTrace.current}');
+
+      // Web環境でminified:KRエラーの場合、HTTP直接リクエストを試行
+      if (kIsWeb &&
+          (e.toString().contains('minified:') || e.toString().contains('KR'))) {
+        print('AI Service Debug: minified:KRエラー検出、HTTP直接リクエストを試行');
+        final result = await _makeDirectApiRequest(prompt);
+        if (result != null && result.isNotEmpty) {
+          print('AI Service Debug: テキスト改善成功（HTTP直接フォールバック）');
+          return result.trim();
+        }
+      }
 
       final errorMessage = e.toString().toLowerCase();
 
@@ -407,22 +507,14 @@ $currentContent
       return 'AI機能を使用するには、APIキーの設定が必要です。設定画面でGemini APIキーを設定してください。';
     }
 
-    try {
-      final model = _model;
-      if (model == null) {
-        print('AI Service Debug: 質問応答失敗 - モデルがnull');
-        throw Exception('AIモデルの初期化に失敗しました。');
-      }
+    // 過去のメモから関連する情報を抽出
+    final contextInfo = context
+        .take(10)
+        .map((memo) =>
+            'タイトル: ${memo.title}\n内容: ${memo.content ?? ""}\nカテゴリ: ${memo.category ?? "未分類"}')
+        .join('\n\n');
 
-      // 過去のメモから関連する情報を抽出
-      final contextInfo = context
-          .take(10)
-          .map((memo) =>
-              'タイトル: ${memo.title}\n内容: ${memo.content ?? ""}\nカテゴリ: ${memo.category ?? "未分類"}')
-          .join('\n\n');
-
-      print('AI Service Debug: Gemini APIに質問リクエスト送信中...');
-      final prompt = Content.text('''
+    final prompt = '''
 フィールドワークと自然観察に関する質問に答えてください。
 
 過去の観察記録（参考情報）：
@@ -435,9 +527,29 @@ $contextInfo
 - 初心者にも分かりやすい説明
 - 過去の観察記録との関連性があれば言及
 - 今後の観察や研究のアドバイスも含める
-''');
+''';
 
-      final response = await model.generateContent([prompt]);
+    // Web環境では直接HTTPリクエストを試行
+    if (kIsWeb) {
+      print('AI Service Debug: Web環境でHTTP直接リクエストを試行');
+      final result = await _makeDirectApiRequest(prompt);
+      if (result != null && result.isNotEmpty) {
+        print('AI Service Debug: 質問応答成功（HTTP直接）');
+        return result.trim();
+      }
+    }
+
+    try {
+      final model = _model;
+      if (model == null) {
+        print('AI Service Debug: 質問応答失敗 - モデルがnull');
+        throw Exception('AIモデルの初期化に失敗しました。');
+      }
+
+      print('AI Service Debug: Gemini APIに質問リクエスト送信中...');
+      final response = await model.generateContent([
+        Content.text(prompt),
+      ]);
 
       print('AI Service Debug: 質問応答レスポンス受信');
       print('AI Service Debug: レスポンステキスト: ${response.text}');
@@ -454,6 +566,17 @@ $contextInfo
       print('AI Service Debug: エラータイプ: ${e.runtimeType}');
       print('AI Service Debug: エラーメッセージ: $e');
       print('AI Service Debug: エラートレース: ${StackTrace.current}');
+
+      // Web環境でminified:KRエラーの場合、HTTP直接リクエストを試行
+      if (kIsWeb &&
+          (e.toString().contains('minified:') || e.toString().contains('KR'))) {
+        print('AI Service Debug: minified:KRエラー検出、HTTP直接リクエストを試行');
+        final result = await _makeDirectApiRequest(prompt);
+        if (result != null && result.isNotEmpty) {
+          print('AI Service Debug: 質問応答成功（HTTP直接フォールバック）');
+          return result.trim();
+        }
+      }
 
       final errorMessage = e.toString().toLowerCase();
 
