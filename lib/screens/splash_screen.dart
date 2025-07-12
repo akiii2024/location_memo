@@ -100,25 +100,26 @@ class _SplashScreenState extends State<SplashScreen>
                 ),
               ),
               const SizedBox(height: 10),
-              // サブタイトル
+              // バージョン番号
               Text(
-                '自然をデータに',
+                AppInfo.version,
                 style: TextStyle(
                   fontSize: 16,
+                  color: Theme.of(context).textTheme.bodyMedium?.color,
+                ),
+              ),
+              const SizedBox(height: 10),
+              // サブタイトル
+              Text(
+                'Developed by Akihisa Iwata',
+                style: TextStyle(
+                  fontSize: 12,
                   color: Theme.of(context)
                       .textTheme
                       .bodyMedium
                       ?.color
                       ?.withOpacity(0.7),
                   fontFamily: 'NotoSansJP',
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                AppInfo.version,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Theme.of(context).textTheme.bodyMedium?.color,
                 ),
               ),
               const SizedBox(height: 50),

@@ -674,12 +674,15 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDarkMode = theme.brightness == Brightness.dark;
+
     return Column(
       children: [
         // 地図操作パネル
         Container(
           padding: const EdgeInsets.all(8.0),
-          color: Colors.grey[100],
+          color: isDarkMode ? Colors.grey[800] : Colors.grey[100],
           child: Row(
             children: [
               Expanded(
@@ -687,32 +690,33 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
                   _mapImagePath != null
                       ? 'カスタム地図: ${path.basename(_mapImagePath!)}'
                       : 'デフォルト地図',
-                  style: const TextStyle(fontSize: 12),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDarkMode ? Colors.white : Colors.black,
+                  ),
                 ),
               ),
-              //IconButton(
-              //  icon: const Icon(Icons.upload_file),
-              //  onPressed: _selectMapImage,
-              //  tooltip: '地図ファイルを選択',
-              //),
-              //if (_mapImagePath != null)
-              //  IconButton(
-              //    icon: const Icon(Icons.clear),
-              //    onPressed: _clearMapImage,
-              //    tooltip: '地図をクリア',
-              //  ),
               IconButton(
-                icon: const Icon(Icons.zoom_in),
+                icon: Icon(
+                  Icons.zoom_in,
+                  color: isDarkMode ? Colors.white : Colors.black,
+                ),
                 onPressed: _zoomIn,
                 tooltip: '拡大',
               ),
               IconButton(
-                icon: const Icon(Icons.zoom_out),
+                icon: Icon(
+                  Icons.zoom_out,
+                  color: isDarkMode ? Colors.white : Colors.black,
+                ),
                 onPressed: _zoomOut,
                 tooltip: '縮小',
               ),
               IconButton(
-                icon: const Icon(Icons.center_focus_strong),
+                icon: Icon(
+                  Icons.center_focus_strong,
+                  color: isDarkMode ? Colors.white : Colors.black,
+                ),
                 onPressed: _resetTransform,
                 tooltip: 'リセット',
               ),

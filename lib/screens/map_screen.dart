@@ -176,43 +176,63 @@ class _MapScreenState extends State<MapScreen> {
               }
             },
             itemBuilder: (context) => [
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'print_map',
                 child: Row(
                   children: [
-                    Icon(Icons.map),
-                    SizedBox(width: 8),
-                    Text('地図画像を印刷'),
+                    Icon(
+                      Icons.map,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white
+                          : Colors.black,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('地図画像を印刷'),
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'print_map_with_pins',
                 child: Row(
                   children: [
-                    Icon(Icons.location_on),
-                    SizedBox(width: 8),
-                    Text('ピン付き地図を印刷'),
+                    Icon(
+                      Icons.location_on,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white
+                          : Colors.black,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('ピン付き地図を印刷'),
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'print_list',
                 child: Row(
                   children: [
-                    Icon(Icons.list),
-                    SizedBox(width: 8),
-                    Text('記録一覧を印刷'),
+                    Icon(
+                      Icons.list,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white
+                          : Colors.black,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('記録一覧を印刷'),
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'save_pdf',
                 child: Row(
                   children: [
-                    Icon(Icons.save),
-                    SizedBox(width: 8),
-                    Text('PDFで保存'),
+                    Icon(
+                      Icons.save,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white
+                          : Colors.black,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('PDFで保存'),
                   ],
                 ),
               ),
