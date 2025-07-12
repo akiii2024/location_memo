@@ -10,6 +10,45 @@ import 'package:http/http.dart' as http;
 class AIService {
   static const String _apiKey = ApiConfig.geminiApiKey; // APIキーをここに設定
 
+  /// デバッグ情報を表示
+  static void printDebugInfo() {
+    print('=== AI Service Debug Info ===');
+    print('AI Service Debug: 実行環境: ${kIsWeb ? 'Web' : 'Native'}');
+    print('AI Service Debug: APIキー設定状況: ${isConfigured}');
+    print('AI Service Debug: APIキー長: ${_apiKey.length}');
+    if (_apiKey.isNotEmpty) {
+      print(
+          'AI Service Debug: APIキー先頭10文字: ${_apiKey.substring(0, _apiKey.length > 10 ? 10 : _apiKey.length)}');
+      print(
+          'AI Service Debug: APIキー形式チェック: ${_apiKey.startsWith('AIza') ? '正常' : '異常'}');
+    } else {
+      print('AI Service Debug: APIキーが設定されていません');
+    }
+    print('AI Service Debug: 現在のURL: ${Uri.base}');
+    print('AI Service Debug: HTTPS接続: ${Uri.base.scheme == 'https'}');
+    print('============================');
+  }
+
+  /// APIキーの設定状況を詳細確認
+  static Map<String, dynamic> checkApiKeyStatus() {
+    final status = <String, dynamic>{};
+
+    status['isEmpty'] = _apiKey.isEmpty;
+    status['length'] = _apiKey.length;
+    status['hasValidPrefix'] = _apiKey.startsWith('AIza');
+    status['hasValidLength'] = _apiKey.length == 39;
+    status['isDefaultValue'] =
+        _apiKey == 'default_value' || _apiKey == 'YOUR_API_KEY';
+    status['isConfigured'] = isConfigured;
+
+    if (_apiKey.isNotEmpty) {
+      status['preview'] =
+          _apiKey.substring(0, _apiKey.length > 10 ? 10 : _apiKey.length);
+    }
+
+    return status;
+  }
+
   /// APIキーが設定されているかどうか
   static bool get isConfigured {
     // Web環境ではAPIキーが設定されていない場合が多いため、
@@ -46,8 +85,14 @@ class AIService {
     return true;
   }
 
-  /// Gemini APIクライアントを取得
+  /// Gemini APIクライアントを取得（Web環境では使用しない）
   static GenerativeModel? get _model {
+    // Web環境では常にHTTP直接リクエストを使用するため、SDKモデルは使用しない
+    if (kIsWeb) {
+      print('AI Service Debug: Web環境ではSDKモデルを使用しません');
+      return null;
+    }
+
     if (!isConfigured) {
       print('AI Service Debug: モデル初期化失敗 - 設定されていません');
       return null;
@@ -116,12 +161,40 @@ class AIService {
       } else {
         print('AI Service Debug: HTTP直接リクエスト 失敗: ${response.statusCode}');
         print('AI Service Debug: エラーレスポンス: ${response.body}');
+
+        // 詳細なエラー情報を表示
+        if (response.statusCode == 400) {
+          print('AI Service Debug: 400エラー - APIキーまたはリクエスト形式に問題があります');
+        } else if (response.statusCode == 401) {
+          print('AI Service Debug: 401エラー - APIキーが無効です');
+        } else if (response.statusCode == 403) {
+          print('AI Service Debug: 403エラー - APIキーの権限が不足しています');
+        } else if (response.statusCode == 429) {
+          print('AI Service Debug: 429エラー - API使用制限に達しています');
+        } else if (response.statusCode == 500) {
+          print('AI Service Debug: 500エラー - サーバー内部エラーです');
+        }
+
         return null;
       }
     } catch (e) {
       print('AI Service Debug: HTTP直接リクエスト エラー詳細:');
       print('AI Service Debug: エラータイプ: ${e.runtimeType}');
       print('AI Service Debug: エラーメッセージ: $e');
+
+      // Web環境での特定エラーの詳細情報
+      if (kIsWeb) {
+        print('AI Service Debug: Web環境でのエラー詳細:');
+        if (e.toString().contains('minified:')) {
+          print('AI Service Debug: minifiedエラー検出 - JavaScript SDKの問題');
+          print('AI Service Debug: HTTP直接リクエストで回避済み');
+        } else if (e.toString().contains('CORS')) {
+          print('AI Service Debug: CORS エラー - ブラウザの制限');
+        } else if (e.toString().contains('Connection')) {
+          print('AI Service Debug: ネットワーク接続エラー');
+        }
+      }
+
       return null;
     }
   }
@@ -129,11 +202,26 @@ class AIService {
   /// API接続テスト
   static Future<bool> testApiConnection() async {
     print('AI Service Debug: API接続テスト開始');
-    print('AI Service Debug: 設定状態: ${isConfigured}');
-    print('AI Service Debug: 実行環境: ${kIsWeb ? 'Web' : 'Native'}');
+
+    // 詳細デバッグ情報を表示
+    printDebugInfo();
+
+    // APIキーの詳細な状況を確認
+    final keyStatus = checkApiKeyStatus();
+    print('AI Service Debug: APIキー詳細状況: $keyStatus');
 
     if (!isConfigured) {
       print('AI Service Debug: API接続テスト失敗 - 設定されていません');
+      if (keyStatus['isEmpty']) {
+        print(
+            'AI Service Debug: 解決策: lib/utils/api_config.dart でAPIキーを設定してください');
+      } else if (keyStatus['isDefaultValue']) {
+        print('AI Service Debug: 解決策: デフォルト値を実際のAPIキーに変更してください');
+      } else if (!keyStatus['hasValidPrefix']) {
+        print('AI Service Debug: 解決策: APIキーは"AIza"で始まる必要があります');
+      } else if (!keyStatus['hasValidLength']) {
+        print('AI Service Debug: 解決策: APIキーは39文字である必要があります');
+      }
       return false;
     }
 
