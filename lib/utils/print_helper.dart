@@ -11,8 +11,8 @@ import 'package:printing/printing.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:convert'; // Base64デコード用
-// 条件付きimport（Web環境でのみdart:htmlをimport）
-import 'dart:html' if (dart.library.html) 'dart:html' as html;
+// Web環境での機能は動的に処理
+import 'web_print_helper_stub.dart' if (dart.library.html) 'web_print_helper.dart';
 
 import '../models/memo.dart';
 
@@ -63,13 +63,8 @@ class PrintHelper {
     if (!kIsWeb) return false;
 
     try {
-      final userAgent = html.window.navigator.userAgent.toLowerCase();
-      return userAgent.contains('mobile') ||
-          userAgent.contains('android') ||
-          userAgent.contains('iphone') ||
-          userAgent.contains('ipad');
+      return WebPrintHelper.isMobileWeb();
     } catch (e) {
-      // Web環境でない場合はfalseを返す
       return false;
     }
   }
@@ -130,12 +125,7 @@ class PrintHelper {
     if (!kIsWeb) return;
 
     try {
-      final blob = html.Blob([pdfBytes], 'application/pdf');
-      final url = html.Url.createObjectUrlFromBlob(blob);
-      final anchor = html.AnchorElement(href: url)
-        ..setAttribute('download', filename)
-        ..click();
-      html.Url.revokeObjectUrl(url);
+      WebPrintHelper.downloadPdfInWeb(pdfBytes, filename);
     } catch (e) {
       print('Web PDFダウンロードエラー: $e');
     }
