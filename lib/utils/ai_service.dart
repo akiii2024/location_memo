@@ -27,8 +27,17 @@ class AIService {
           'AI Service Debug: APIキー先頭10文字: ${_apiKey.substring(0, _apiKey.length > 10 ? 10 : _apiKey.length)}');
 
       // Web環境ではAPIキーが環境変数で設定されていない場合がある
-      final isConfigured = _apiKey.isNotEmpty && _apiKey != 'default_value';
+      final isConfigured = _apiKey.isNotEmpty &&
+          _apiKey != 'default_value' &&
+          _apiKey != 'YOUR_API_KEY' &&
+          _apiKey.length > 20;
       print('AI Service Debug: Web環境での設定状態: $isConfigured');
+
+      if (!isConfigured) {
+        print('AI Service Debug: Web環境でAPIキーが適切に設定されていません');
+        print('AI Service Debug: APIキーの形式を確認してください（AIzaで始まる39文字）');
+      }
+
       return isConfigured;
     }
 
@@ -64,6 +73,8 @@ class AIService {
 
     try {
       print('AI Service Debug: Web環境でHTTP直接リクエスト開始');
+      print('AI Service Debug: 現在のドメイン: ${Uri.base.toString()}');
+      print('AI Service Debug: HTTPS接続: ${Uri.base.scheme == 'https'}');
 
       final url = Uri.parse(
           'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$_apiKey');
@@ -75,33 +86,42 @@ class AIService {
               {'text': prompt}
             ]
           }
-        ]
+        ],
+        'generationConfig': {
+          'temperature': 0.7,
+          'topP': 0.95,
+          'maxOutputTokens': 2048,
+        }
       };
 
       final response = await http.post(
         url,
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'User-Agent': 'location_memo/1.0',
         },
         body: json.encode(requestBody),
       );
 
       print('AI Service Debug: HTTP直接リクエスト レスポンス状態: ${response.statusCode}');
-      print('AI Service Debug: HTTP直接リクエスト レスポンス本文: ${response.body}');
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
         final text =
             responseData['candidates']?[0]?['content']?['parts']?[0]?['text'];
-        print('AI Service Debug: HTTP直接リクエスト 成功: $text');
+        print(
+            'AI Service Debug: HTTP直接リクエスト 成功: ${text?.substring(0, text.length > 100 ? 100 : text.length)}...');
         return text;
       } else {
-        print(
-            'AI Service Debug: HTTP直接リクエスト 失敗: ${response.statusCode} - ${response.body}');
+        print('AI Service Debug: HTTP直接リクエスト 失敗: ${response.statusCode}');
+        print('AI Service Debug: エラーレスポンス: ${response.body}');
         return null;
       }
     } catch (e) {
-      print('AI Service Debug: HTTP直接リクエスト エラー: $e');
+      print('AI Service Debug: HTTP直接リクエスト エラー詳細:');
+      print('AI Service Debug: エラータイプ: ${e.runtimeType}');
+      print('AI Service Debug: エラーメッセージ: $e');
       return null;
     }
   }
@@ -110,19 +130,23 @@ class AIService {
   static Future<bool> testApiConnection() async {
     print('AI Service Debug: API接続テスト開始');
     print('AI Service Debug: 設定状態: ${isConfigured}');
+    print('AI Service Debug: 実行環境: ${kIsWeb ? 'Web' : 'Native'}');
 
     if (!isConfigured) {
       print('AI Service Debug: API接続テスト失敗 - 設定されていません');
       return false;
     }
 
-    // Web環境では直接HTTPリクエストを試行
+    // Web環境では最初からHTTP直接リクエストを試行
     if (kIsWeb) {
       print('AI Service Debug: Web環境でHTTP直接リクエストを試行');
-      final result = await _makeDirectApiRequest('こんにちは');
-      return result != null && result.isNotEmpty;
+      final result = await _makeDirectApiRequest('こんにちは、APIテストです。');
+      final success = result != null && result.isNotEmpty;
+      print('AI Service Debug: Web環境 API接続テスト結果: $success');
+      return success;
     }
 
+    // ネイティブ環境でのテスト
     try {
       final model = _model;
       if (model == null) {
@@ -130,36 +154,22 @@ class AIService {
         return false;
       }
 
-      print('AI Service Debug: APIリクエスト送信中...');
+      print('AI Service Debug: ネイティブ環境でのAPIリクエスト送信中...');
       final response = await model.generateContent([
-        Content.text('こんにちは'),
+        Content.text('こんにちは、APIテストです。'),
       ]);
 
       print('AI Service Debug: APIレスポンス受信');
       print('AI Service Debug: レスポンステキスト: ${response.text}');
 
       final success = response.text != null && response.text!.isNotEmpty;
-      print('AI Service Debug: API接続テスト結果: $success');
+      print('AI Service Debug: ネイティブ環境 API接続テスト結果: $success');
       return success;
     } catch (e) {
-      print('AI Service Debug: API接続テストエラー詳細:');
+      print('AI Service Debug: ネイティブ環境 API接続テストエラー詳細:');
       print('AI Service Debug: エラータイプ: ${e.runtimeType}');
       print('AI Service Debug: エラーメッセージ: $e');
       print('AI Service Debug: エラートレース: ${StackTrace.current}');
-
-      // Web環境特有のエラー情報
-      if (kIsWeb) {
-        print('AI Service Debug: Web環境でのエラー情報:');
-        print('AI Service Debug: 現在のURL: ${Uri.base}');
-        print('AI Service Debug: HTTPS接続: ${Uri.base.scheme == 'https'}');
-
-        // minified:KRエラーの場合、HTTPリクエストを試行
-        if (e.toString().contains('minified:') || e.toString().contains('KR')) {
-          print('AI Service Debug: minified:KRエラー検出、HTTP直接リクエストを試行');
-          final result = await _makeDirectApiRequest('こんにちは');
-          return result != null && result.isNotEmpty;
-        }
-      }
 
       return false;
     }
@@ -429,13 +439,16 @@ $currentContent
 - 今後の観察で注意すべき点の提案
 ''';
 
-    // Web環境では直接HTTPリクエストを試行
+    // Web環境では最初からHTTP直接リクエストを試行
     if (kIsWeb) {
       print('AI Service Debug: Web環境でHTTP直接リクエストを試行');
       final result = await _makeDirectApiRequest(prompt);
       if (result != null && result.isNotEmpty) {
         print('AI Service Debug: テキスト改善成功（HTTP直接）');
         return result.trim();
+      } else {
+        print('AI Service Debug: Web環境でHTTP直接リクエストが失敗');
+        throw Exception('Web環境でのテキスト改善に失敗しました。\n\nAPIキーまたはネットワーク接続を確認してください。');
       }
     }
 
@@ -466,17 +479,6 @@ $currentContent
       print('AI Service Debug: エラータイプ: ${e.runtimeType}');
       print('AI Service Debug: エラーメッセージ: $e');
       print('AI Service Debug: エラートレース: ${StackTrace.current}');
-
-      // Web環境でminified:KRエラーの場合、HTTP直接リクエストを試行
-      if (kIsWeb &&
-          (e.toString().contains('minified:') || e.toString().contains('KR'))) {
-        print('AI Service Debug: minified:KRエラー検出、HTTP直接リクエストを試行');
-        final result = await _makeDirectApiRequest(prompt);
-        if (result != null && result.isNotEmpty) {
-          print('AI Service Debug: テキスト改善成功（HTTP直接フォールバック）');
-          return result.trim();
-        }
-      }
 
       final errorMessage = e.toString().toLowerCase();
 
@@ -529,13 +531,16 @@ $contextInfo
 - 今後の観察や研究のアドバイスも含める
 ''';
 
-    // Web環境では直接HTTPリクエストを試行
+    // Web環境では最初からHTTP直接リクエストを試行
     if (kIsWeb) {
       print('AI Service Debug: Web環境でHTTP直接リクエストを試行');
       final result = await _makeDirectApiRequest(prompt);
       if (result != null && result.isNotEmpty) {
         print('AI Service Debug: 質問応答成功（HTTP直接）');
         return result.trim();
+      } else {
+        print('AI Service Debug: Web環境でHTTP直接リクエストが失敗');
+        throw Exception('Web環境での質問応答に失敗しました。\n\nAPIキーまたはネットワーク接続を確認してください。');
       }
     }
 
@@ -566,17 +571,6 @@ $contextInfo
       print('AI Service Debug: エラータイプ: ${e.runtimeType}');
       print('AI Service Debug: エラーメッセージ: $e');
       print('AI Service Debug: エラートレース: ${StackTrace.current}');
-
-      // Web環境でminified:KRエラーの場合、HTTP直接リクエストを試行
-      if (kIsWeb &&
-          (e.toString().contains('minified:') || e.toString().contains('KR'))) {
-        print('AI Service Debug: minified:KRエラー検出、HTTP直接リクエストを試行');
-        final result = await _makeDirectApiRequest(prompt);
-        if (result != null && result.isNotEmpty) {
-          print('AI Service Debug: 質問応答成功（HTTP直接フォールバック）');
-          return result.trim();
-        }
-      }
 
       final errorMessage = e.toString().toLowerCase();
 
