@@ -43,18 +43,31 @@
   <!-- PWA表示最適化用CSS -->
   <style>
     /* PWA環境での表示最適化 */
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+    
+    /* PWAモードでの最適化 */
     @media (display-mode: standalone) {
       body {
         /* PWAモードでの安全領域確保 */
-        padding-bottom: env(safe-area-inset-bottom);
-        padding-top: env(safe-area-inset-top);
-        padding-left: env(safe-area-inset-left);
-        padding-right: env(safe-area-inset-right);
+        padding-bottom: env(safe-area-inset-bottom, 20px);
+        padding-top: env(safe-area-inset-top, 0px);
+        padding-left: env(safe-area-inset-left, 0px);
+        padding-right: env(safe-area-inset-right, 0px);
       }
       
       /* フローティング要素の調整 */
       .floating-action-button {
-        bottom: calc(env(safe-area-inset-bottom) + 16px);
+        bottom: calc(env(safe-area-inset-bottom, 20px) + 16px);
+      }
+      
+      /* ホームバーとの重複を防ぐ */
+      flt-glass-pane {
+        padding-bottom: env(safe-area-inset-bottom, 20px) !important;
       }
     }
     
@@ -62,12 +75,75 @@
     @media (max-width: 768px) {
       body {
         /* モバイルでの安全領域確保 */
-        padding-bottom: env(safe-area-inset-bottom, 0px);
+        padding-bottom: env(safe-area-inset-bottom, 20px);
       }
+      
+      /* iOS Safari専用の調整 */
+      @supports (-webkit-touch-callout: none) {
+        body {
+          padding-bottom: calc(env(safe-area-inset-bottom, 20px) + 10px);
+        }
+      }
+    }
+    
+    /* タブレット環境での調整 */
+    @media (min-width: 769px) and (max-width: 1024px) {
+      body {
+        padding-bottom: env(safe-area-inset-bottom, 10px);
+      }
+    }
+    
+    /* Flutter Web特有の調整 */
+    flt-semantics-host {
+      padding-bottom: env(safe-area-inset-bottom, 0px) !important;
     }
   </style>
 </head>
 <body>
+  <!-- PWA環境での動的調整スクリプト -->
+  <script>
+    // PWA環境での表示最適化
+    function adjustForPWA() {
+      // PWAモードかどうかを検出
+      const isPWA = window.matchMedia('(display-mode: standalone)').matches ||
+                    window.navigator.standalone ||
+                    document.referrer.includes('android-app://');
+      
+      if (isPWA) {
+        console.log('PWA環境で実行中');
+        
+        // ビューポートの高さを取得
+        const viewportHeight = window.innerHeight;
+        const screenHeight = window.screen.height;
+        
+        // ホームバーの高さを推定
+        const homeBarHeight = screenHeight - viewportHeight;
+        
+        if (homeBarHeight > 0) {
+          console.log('ホームバー検出:', homeBarHeight + 'px');
+          
+          // 動的にパディングを調整
+          document.body.style.paddingBottom = (homeBarHeight + 10) + 'px';
+        }
+        
+        // iOS Safari特有の調整
+        if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+          console.log('iOS環境での調整');
+          document.body.style.paddingBottom = '30px';
+        }
+      }
+    }
+    
+    // ページ読み込み時とリサイズ時に調整
+    window.addEventListener('load', adjustForPWA);
+    window.addEventListener('resize', adjustForPWA);
+    
+    // PWA表示モードの変更を監視
+    if (window.matchMedia) {
+      window.matchMedia('(display-mode: standalone)').addListener(adjustForPWA);
+    }
+  </script>
+  
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

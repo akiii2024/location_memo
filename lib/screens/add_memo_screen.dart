@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode;
 // import 'package:geolocator/geolocator.dart';  // 一時的に無効化
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
@@ -533,34 +533,36 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(errorMessage),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'デバッグ情報:',
-                            style: TextStyle(
-                                fontSize: 12, fontWeight: FontWeight.bold),
-                          ),
-                          Text('• エラータイプ: ${aiError.runtimeType}',
-                              style: const TextStyle(fontSize: 10)),
-                          Text('• Web環境: ${kIsWeb}',
-                              style: const TextStyle(fontSize: 10)),
-                          Text('• APIキー設定: ${AIService.isConfigured}',
-                              style: const TextStyle(fontSize: 10)),
-                          if (kIsWeb) ...[
-                            Text('• HTTPS接続: ${Uri.base.scheme == 'https'}',
+                    if (kIsWeb) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'デバッグ情報:',
+                              style: TextStyle(
+                                  fontSize: 12, fontWeight: FontWeight.bold),
+                            ),
+                            Text('• エラータイプ: ${aiError.runtimeType}',
                                 style: const TextStyle(fontSize: 10)),
+                            Text('• Web環境: ${kIsWeb}',
+                                style: const TextStyle(fontSize: 10)),
+                            Text('• APIキー設定: ${AIService.isConfigured}',
+                                style: const TextStyle(fontSize: 10)),
+                            if (kIsWeb) ...[
+                              Text('• HTTPS接続: ${Uri.base.scheme == 'https'}',
+                                  style: const TextStyle(fontSize: 10)),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
                 backgroundColor: Colors.orange,
@@ -773,34 +775,36 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(errorMessage),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'デバッグ情報:',
-                      style:
-                          TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                    ),
-                    Text('• エラータイプ: ${e.runtimeType}',
-                        style: const TextStyle(fontSize: 10)),
-                    Text('• Web環境: ${kIsWeb}',
-                        style: const TextStyle(fontSize: 10)),
-                    Text('• APIキー設定: ${AIService.isConfigured}',
-                        style: const TextStyle(fontSize: 10)),
-                    if (kIsWeb) ...[
-                      Text('• HTTPS接続: ${Uri.base.scheme == 'https'}',
+              if (kIsWeb) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'デバッグ情報:',
+                        style: TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                      Text('• エラータイプ: ${e.runtimeType}',
                           style: const TextStyle(fontSize: 10)),
+                      Text('• Web環境: ${kIsWeb}',
+                          style: const TextStyle(fontSize: 10)),
+                      Text('• APIキー設定: ${AIService.isConfigured}',
+                          style: const TextStyle(fontSize: 10)),
+                      if (kIsWeb) ...[
+                        Text('• HTTPS接続: ${Uri.base.scheme == 'https'}',
+                            style: const TextStyle(fontSize: 10)),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ],
           ),
           backgroundColor: Colors.red,
@@ -1003,39 +1007,19 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('改善提案の生成に失敗しました: $e'),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(4),
+              Text('改善提案の生成に失敗しました'),
+              if (kIsWeb) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'デバッグ: ${e.runtimeType}',
+                  style: const TextStyle(fontSize: 10, color: Colors.white70),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'デバッグ情報:',
-                      style:
-                          TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                    ),
-                    Text('• エラータイプ: ${e.runtimeType}',
-                        style: const TextStyle(fontSize: 10)),
-                    Text('• Web環境: ${kIsWeb}',
-                        style: const TextStyle(fontSize: 10)),
-                    Text('• APIキー設定: ${AIService.isConfigured}',
-                        style: const TextStyle(fontSize: 10)),
-                    if (kIsWeb) ...[
-                      Text('• HTTPS接続: ${Uri.base.scheme == 'https'}',
-                          style: const TextStyle(fontSize: 10)),
-                    ],
-                  ],
-                ),
-              ),
+              ],
             ],
           ),
           backgroundColor: Colors.red,
-          duration: const Duration(seconds: 8),
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
         ),
       );
     } finally {
@@ -1107,41 +1091,20 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('回答の生成に失敗しました: $e'),
-                          const SizedBox(height: 8),
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(4),
+                          Text('回答の生成に失敗しました'),
+                          if (kIsWeb) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'デバッグ: ${e.runtimeType}',
+                              style: const TextStyle(
+                                  fontSize: 10, color: Colors.white70),
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'デバッグ情報:',
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold),
-                                ),
-                                Text('• エラータイプ: ${e.runtimeType}',
-                                    style: const TextStyle(fontSize: 10)),
-                                Text('• Web環境: ${kIsWeb}',
-                                    style: const TextStyle(fontSize: 10)),
-                                Text('• APIキー設定: ${AIService.isConfigured}',
-                                    style: const TextStyle(fontSize: 10)),
-                                if (kIsWeb) ...[
-                                  Text(
-                                      '• HTTPS接続: ${Uri.base.scheme == 'https'}',
-                                      style: const TextStyle(fontSize: 10)),
-                                ],
-                              ],
-                            ),
-                          ),
+                          ],
                         ],
                       ),
                       backgroundColor: Colors.red,
-                      duration: const Duration(seconds: 8),
+                      duration: const Duration(seconds: 4),
+                      behavior: SnackBarBehavior.floating,
                     ),
                   );
                 } finally {
