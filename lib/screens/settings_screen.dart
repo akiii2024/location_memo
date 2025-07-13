@@ -1037,8 +1037,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   context: context,
                   builder: (context) => AlertDialog(
                     title: const Text('バージョン情報'),
-                    content: Text(
-                        '${AppInfo.appName}\n${AppInfo.version}\nDeveloped by Akihisa Iwata'),
+                    content: Text('${AppInfo.appName}\n${AppInfo.version}'),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.of(context).pop(),
