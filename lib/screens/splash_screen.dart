@@ -111,7 +111,7 @@ class _SplashScreenState extends State<SplashScreen>
               const SizedBox(height: 10),
               // サブタイトル
               Text(
-                'Developed by Akihisa Iwata',
+                'Powered by Flutter',
                 style: TextStyle(
                   fontSize: 12,
                   color: Theme.of(context)

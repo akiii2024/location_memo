@@ -148,6 +148,9 @@ maps/
 location_data/
 memo_attachments/
 
+# Scripts folder
+scripts/
+
 # Debug logs
 logs/
 debug.log
