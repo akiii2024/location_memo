@@ -26,9 +26,14 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
-    // 画面が構築された後にalpha版警告ダイアログを表示
+    // タッチイベント競合を防ぐため、十分な遅延後にダイアログを表示
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkAndShowAlphaWarningDialog();
+      // PWA環境でのタッチ反応問題を解決するため、遅延を長めに設定
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (mounted) {
+          _checkAndShowAlphaWarningDialog();
+        }
+      });
     });
   }
 
@@ -131,85 +136,59 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // PWA環境での動的パディング計算
-    double bottomPadding = 0;
-    if (kIsWeb) {
-      // Web環境での追加パディング
-      final mediaQuery = MediaQuery.of(context);
-      final screenHeight = mediaQuery.size.height;
-      final viewInsets = mediaQuery.viewInsets;
-      final padding = mediaQuery.padding;
-
-      // PWA環境でのホームバー対応
-      if (screenHeight < 800) {
-        // 小さな画面（モバイル）でのパディング調整
-        bottomPadding = 20;
-      } else {
-        // デスクトップでのパディング調整
-        bottomPadding = 10;
-      }
-
-      // ビューポートの安全領域を考慮
-      bottomPadding += padding.bottom;
-    }
-
     return Scaffold(
       body: _screens[_currentIndex],
-      bottomNavigationBar: Container(
-        // Web環境での追加パディング
-        padding: EdgeInsets.only(bottom: bottomPadding),
-        child: SafeArea(
-          // SafeAreaの設定を調整
-          minimum: EdgeInsets.only(
-            bottom: kIsWeb ? 8.0 : 0.0, // Web環境では最小パディングを追加
+      bottomNavigationBar: SafeArea(
+        // PWA環境でのタッチ反応問題を解決するため、パディング計算を簡素化
+        minimum: EdgeInsets.only(
+          bottom: kIsWeb ? 4.0 : 0.0, // Web環境では最小限のパディング
+        ),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).scaffoldBackgroundColor,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                spreadRadius: 0,
+                blurRadius: 4,
+                offset: const Offset(0, -2),
+              ),
+            ],
           ),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Theme.of(context).scaffoldBackgroundColor,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  spreadRadius: 0,
-                  blurRadius: 4,
-                  offset: const Offset(0, -2),
-                ),
-              ],
-            ),
-            child: BottomNavigationBar(
-              type: BottomNavigationBarType.fixed,
-              currentIndex: _currentIndex,
-              onTap: (index) {
-                setState(() {
-                  _currentIndex = index;
-                });
-              },
-              // PWA環境での表示を最適化
-              elevation: 0,
-              backgroundColor: Colors.transparent,
-              selectedItemColor: Theme.of(context).primaryColor,
-              unselectedItemColor: Colors.grey,
-              // Web環境での高さ調整
-              selectedFontSize: kIsWeb ? 10 : 12,
-              unselectedFontSize: kIsWeb ? 10 : 12,
-              items: const [
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.home),
-                  label: 'ホーム',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.search),
-                  label: '検索',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.push_pin),
-                  label: 'ピン一覧',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.settings),
-                  label: '設定',
-                ),
-              ],
-            ),
+          child: BottomNavigationBar(
+            type: BottomNavigationBarType.fixed,
+            currentIndex: _currentIndex,
+            onTap: (index) {
+              setState(() {
+                _currentIndex = index;
+              });
+            },
+            // PWA環境での表示を最適化
+            elevation: 0,
+            backgroundColor: Colors.transparent,
+            selectedItemColor: Theme.of(context).primaryColor,
+            unselectedItemColor: Colors.grey,
+            // Web環境での高さ調整
+            selectedFontSize: kIsWeb ? 10 : 12,
+            unselectedFontSize: kIsWeb ? 10 : 12,
+            items: const [
+              BottomNavigationBarItem(
+                icon: Icon(Icons.home),
+                label: 'ホーム',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.search),
+                label: '検索',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.push_pin),
+                label: 'ピン一覧',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.settings),
+                label: '設定',
+              ),
+            ],
           ),
         ),
       ),

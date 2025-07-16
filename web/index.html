@@ -19,7 +19,8 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="位置情報付きメモアプリ - 場所とメモを簡単に記録・管理">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <!-- iOS PWA タッチ反応問題を解決するため最適化されたビューポート設定 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no, interactive-widget=resizes-content">
 
   <!-- PWA meta tags -->
   <meta name="theme-color" content="#2196f3">
@@ -27,9 +28,12 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Location Memo">
   <meta name="msapplication-TileColor" content="#2196f3">
-  <meta name="msapplication-tap-highlight" content="no">
+  <!-- iOS PWAでのタッチ反応改善のため、タップハイライトを有効化 -->
+  <meta name="msapplication-tap-highlight" content="yes">
   <!-- PWA表示モードでの最適化 -->
   <meta name="mobile-web-app-capable" content="yes">
+  <!-- iOS Safari PWA タッチ遅延を解決 -->
+  <meta name="apple-touch-fullscreen" content="yes">
 
   <!-- iOS meta tags & icons -->
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
@@ -40,7 +44,7 @@
   <title>Location Memo</title>
   <link rel="manifest" href="manifest.json">
   
-  <!-- PWA表示最適化用CSS -->
+  <!-- PWA表示最適化用CSS - iOS タッチ反応問題を解決 -->
   <style>
     /* PWA環境での表示最適化 */
     html, body {
@@ -48,48 +52,30 @@
       padding: 0;
       height: 100%;
       overflow: hidden;
+      /* iOS PWA タッチ遅延を解決 */
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: rgba(0,0,0,0.1);
+      touch-action: manipulation;
     }
     
     /* PWAモードでの最適化 */
     @media (display-mode: standalone) {
       body {
-        /* PWAモードでの安全領域確保 */
-        padding-bottom: env(safe-area-inset-bottom, 20px);
+        /* PWAモードでの安全領域確保 - 簡素化 */
+        padding-bottom: env(safe-area-inset-bottom, 0px);
         padding-top: env(safe-area-inset-top, 0px);
         padding-left: env(safe-area-inset-left, 0px);
         padding-right: env(safe-area-inset-right, 0px);
       }
-      
-      /* フローティング要素の調整 */
-      .floating-action-button {
-        bottom: calc(env(safe-area-inset-bottom, 20px) + 16px);
-      }
-      
-      /* ホームバーとの重複を防ぐ */
-      flt-glass-pane {
-        padding-bottom: env(safe-area-inset-bottom, 20px) !important;
-      }
     }
     
-    /* モバイルブラウザでの最適化 */
-    @media (max-width: 768px) {
+    /* iOS Safari専用の調整 - 簡素化 */
+    @supports (-webkit-touch-callout: none) {
       body {
-        /* モバイルでの安全領域確保 */
-        padding-bottom: env(safe-area-inset-bottom, 20px);
-      }
-      
-      /* iOS Safari専用の調整 */
-      @supports (-webkit-touch-callout: none) {
-        body {
-          padding-bottom: calc(env(safe-area-inset-bottom, 20px) + 10px);
-        }
-      }
-    }
-    
-    /* タブレット環境での調整 */
-    @media (min-width: 769px) and (max-width: 1024px) {
-      body {
-        padding-bottom: env(safe-area-inset-bottom, 10px);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        /* iOS PWA タッチ反応改善 */
+        -webkit-overflow-scrolling: touch;
       }
     }
     
@@ -97,13 +83,20 @@
     flt-semantics-host {
       padding-bottom: env(safe-area-inset-bottom, 0px) !important;
     }
+    
+    /* タッチターゲットの最適化 */
+    button, .clickable, [role="button"] {
+      min-height: 44px;
+      min-width: 44px;
+      touch-action: manipulation;
+    }
   </style>
 </head>
 <body>
-  <!-- PWA環境での動的調整スクリプト -->
+  <!-- PWA環境での軽量な調整スクリプト - iOS タッチ反応問題を解決 -->
   <script>
-    // PWA環境での表示最適化
-    function adjustForPWA() {
+    // PWA環境での最小限の表示最適化
+    function initializePWA() {
       // PWAモードかどうかを検出
       const isPWA = window.matchMedia('(display-mode: standalone)').matches ||
                     window.navigator.standalone ||
@@ -112,35 +105,21 @@
       if (isPWA) {
         console.log('PWA環境で実行中');
         
-        // ビューポートの高さを取得
-        const viewportHeight = window.innerHeight;
-        const screenHeight = window.screen.height;
-        
-        // ホームバーの高さを推定
-        const homeBarHeight = screenHeight - viewportHeight;
-        
-        if (homeBarHeight > 0) {
-          console.log('ホームバー検出:', homeBarHeight + 'px');
-          
-          // 動的にパディングを調整
-          document.body.style.paddingBottom = (homeBarHeight + 10) + 'px';
-        }
-        
-        // iOS Safari特有の調整
+        // iOS Safari特有の調整のみ実行
         if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
-          console.log('iOS環境での調整');
-          document.body.style.paddingBottom = '30px';
+          console.log('iOS PWA環境での最適化');
+          // iOS PWA タッチ反応改善のための最小限の調整
+          document.body.style.touchAction = 'manipulation';
+          document.body.style.webkitTouchCallout = 'none';
         }
       }
     }
     
-    // ページ読み込み時とリサイズ時に調整
-    window.addEventListener('load', adjustForPWA);
-    window.addEventListener('resize', adjustForPWA);
-    
-    // PWA表示モードの変更を監視
-    if (window.matchMedia) {
-      window.matchMedia('(display-mode: standalone)').addListener(adjustForPWA);
+    // ページ読み込み完了後に一度だけ実行
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initializePWA);
+    } else {
+      initializePWA();
     }
   </script>
   

@@ -294,6 +294,8 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
         }
       },
       child: GestureDetector(
+        // iOS PWA タッチ反応問題を解決するため、タッチ動作を最適化
+        behavior: HitTestBehavior.opaque,
         onTapDown: (details) {
           // タップ位置を地図座標に変換
           final RenderBox renderBox = context.findRenderObject() as RenderBox;
@@ -399,6 +401,8 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
                             left: pinX - pinSize / 2,
                             top: pinY - pinSize,
                             child: GestureDetector(
+                              // iOS PWA タッチ反応問題を解決するため、タッチ動作を最適化
+                              behavior: HitTestBehavior.opaque,
                               onTap: () => widget.onMemoTap(memo),
                               onLongPress: () =>
                                   _showPinNumberDialog(memo), // 長押しで番号編集
