@@ -17,16 +17,13 @@
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
-  <meta http-equiv="X-UA-Compatible" content="IE=Edge">
-  <meta name="description" content="位置情報付きメモアプリ - 場所とメモを簡単に記録・管理">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <meta name="description" content="位置情報付きメモアプリ">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
   <!-- PWA meta tags -->
-  <meta name="theme-color" content="#219653">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="Location Memo">
-  <meta name="mobile-web-app-capable" content="yes">
 
   <!-- iOS meta tags & icons -->
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
@@ -35,81 +32,6 @@
 
   <title>Location Memo</title>
   <link rel="manifest" href="manifest.json">
-  
-  <!-- 基本的なPWA最適化用CSS -->
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      overflow: hidden;
-      /* タッチ操作の最適化 */
-      touch-action: manipulation;
-      -webkit-touch-callout: none;
-      -webkit-user-select: none;
-      -webkit-tap-highlight-color: transparent;
-    }
-    
-    /* iPhoneのホームバー（safe-area）対応 */
-    body {
-      /* 常にsafe-areaに対応 */
-      padding-top: env(safe-area-inset-top, 0px);
-      padding-right: env(safe-area-inset-right, 0px);
-      padding-bottom: env(safe-area-inset-bottom, 0px);
-      padding-left: env(safe-area-inset-left, 0px);
-    }
-    
-    /* Flutterアプリのコンテナに対する追加対応 */
-    flt-scene-host, flutter-view, #main_target {
-      /* Flutterビューも確実にsafe-areaに収める */
-      padding-top: env(safe-area-inset-top, 0px) !important;
-      padding-right: env(safe-area-inset-right, 0px) !important;
-      padding-bottom: env(safe-area-inset-bottom, 0px) !important;
-      padding-left: env(safe-area-inset-left, 0px) !important;
-      box-sizing: border-box;
-    }
-    
-    /* PWAモードでのホームバー回避（より強力な対応） */
-    @media (display-mode: standalone) {
-      body {
-        /* PWAモードではより積極的にsafe-areaを適用 */
-        padding-bottom: env(safe-area-inset-bottom, 20px);
-        padding-top: env(safe-area-inset-top, 20px);
-        padding-left: env(safe-area-inset-left, 0px);
-        padding-right: env(safe-area-inset-right, 0px);
-      }
-      
-      flt-scene-host, flutter-view, #main_target {
-        padding-bottom: env(safe-area-inset-bottom, 20px) !important;
-        padding-top: env(safe-area-inset-top, 20px) !important;
-      }
-    }
-    
-    /* iPhone X以降の機種でのより細かい対応 */
-    @supports (padding: max(0px)) {
-      body {
-        padding-top: max(env(safe-area-inset-top, 0px), 20px);
-        padding-right: max(env(safe-area-inset-right, 0px), 0px);
-        padding-bottom: max(env(safe-area-inset-bottom, 0px), 20px);
-        padding-left: max(env(safe-area-inset-left, 0px), 0px);
-      }
-    }
-    
-    /* タッチターゲットの最適化 */
-    button, .clickable, [role="button"] {
-      min-height: 44px;
-      min-width: 44px;
-      touch-action: manipulation;
-    }
-    
-    /* フルスクリーン環境での調整 */
-    @media (display-mode: fullscreen) {
-      body {
-        padding-bottom: env(safe-area-inset-bottom, 34px);
-        padding-top: env(safe-area-inset-top, 44px);
-      }
-    }
-  </style>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
