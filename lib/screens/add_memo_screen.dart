@@ -54,15 +54,170 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
   bool _isPlaying = false;
   bool _isTranscribing = false; // 音声文字起こし中のフラグ
 
+  // キノコ詳細情報の状態変数
+  String? _selectedMushroomCapShape;
+  String? _selectedMushroomCapColor;
+  String? _selectedMushroomCapSurface;
+  String? _selectedMushroomCapSize;
+  String? _selectedMushroomCapUnderStructure;
+  String? _selectedMushroomGillFeature;
+  String? _selectedMushroomStemPresence;
+  String? _selectedMushroomStemShape;
+  String? _selectedMushroomStemColor;
+  String? _selectedMushroomStemSurface;
+  String? _selectedMushroomRingPresence;
+  String? _selectedMushroomVolvaPresence;
+  String? _selectedMushroomHabitat;
+  String? _selectedMushroomGrowthPattern;
+
   final List<String> _categories = [
     'カテゴリを選択してください',
     '植物',
+    'キノコ',
     '動物',
     '昆虫',
     '鉱物',
     '化石',
     '地形',
     'その他',
+  ];
+
+  // キノコ専用の選択肢
+  final List<String> _mushroomCapShapeOptions = [
+    '選択してください',
+    '半球型',
+    '饅頭型',
+    '扁平型／平ら型',
+    '中高扁平型（中心が盛り上がる）',
+    '釣鐘型',
+    '円錐型',
+    '皿型',
+    '漏斗状',
+    '杯状',
+    '貝殻・扇形',
+  ];
+
+  final List<String> _mushroomCapColorOptions = [
+    '選択してください',
+    '白',
+    '黄',
+    '赤',
+    '茶',
+    '灰',
+    '黒',
+    'ピンク',
+    'オレンジ',
+    '青',
+    '紫',
+    'その他',
+  ];
+
+  final List<String> _mushroomCapSurfaceOptions = [
+    '選択してください',
+    '滑らか',
+    '粗い',
+    '鱗片あり',
+    '粘性（ねばり）あり',
+    'ひび割れ',
+    '毛・繊維状',
+    'しっとり',
+    'その他',
+  ];
+
+  final List<String> _mushroomCapSizeOptions = [
+    '選択してください',
+    '1cm未満',
+    '1〜3cm',
+    '3〜6cm',
+    '6〜10cm',
+    '10cm以上',
+  ];
+
+  final List<String> _mushroomCapUnderStructureOptions = [
+    '選択してください',
+    'ヒダ',
+    '管孔（スポンジ状）',
+    'しわ',
+    '棒状／トゲ状',
+    '網目状',
+    'その他',
+  ];
+
+  final List<String> _mushroomGillFeatureOptions = [
+    '選択してください',
+    '密',
+    '疎',
+    '分岐あり',
+    '枝分かれしない',
+    '柄に垂生／離生（柄にくっついている／いない）',
+    'その他',
+  ];
+
+  final List<String> _mushroomStemPresenceOptions = [
+    '選択してください',
+    'あり',
+    'なし',
+  ];
+
+  final List<String> _mushroomStemShapeOptions = [
+    '選択してください',
+    '真っ直ぐ',
+    '曲がっている',
+    '太い',
+    '細い',
+    '棍棒状',
+    '棒状',
+    '空洞',
+    'その他',
+  ];
+
+  final List<String> _mushroomStemColorOptions = [
+    '選択してください',
+    '白',
+    '黄',
+    '茶',
+    '灰',
+    '赤',
+    'その他',
+  ];
+
+  final List<String> _mushroomStemSurfaceOptions = [
+    '選択してください',
+    '滑らか',
+    '繊維状',
+    'ささくれ',
+    '鱗片あり',
+    'その他',
+  ];
+
+  final List<String> _mushroomRingPresenceOptions = [
+    '選択してください',
+    'あり',
+    'なし',
+  ];
+
+  final List<String> _mushroomVolvaPresenceOptions = [
+    '選択してください',
+    'あり',
+    'なし',
+  ];
+
+  final List<String> _mushroomHabitatOptions = [
+    '選択してください',
+    '地面（土）',
+    '木（生木）',
+    '枯木',
+    '落ち葉',
+    '草地',
+    '苔むした場所',
+    'その他',
+  ];
+
+  final List<String> _mushroomGrowthPatternOptions = [
+    '選択してください',
+    '単生（1本のみ）',
+    '群生（数本がまとまって生える）',
+    '束生（根元から多数まとまる）',
   ];
 
   @override
@@ -307,6 +462,50 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         mapId: _selectedMapId, // 選択された地図ID
         audioPath: _audioPath, // 音声ファイルのパス
         imagePaths: _imagePaths.isNotEmpty ? _imagePaths : null, // 画像パス配列
+        // キノコ詳細情報（「選択してください」は保存しない）
+        mushroomCapShape: _selectedMushroomCapShape == '選択してください'
+            ? null
+            : _selectedMushroomCapShape,
+        mushroomCapColor: _selectedMushroomCapColor == '選択してください'
+            ? null
+            : _selectedMushroomCapColor,
+        mushroomCapSurface: _selectedMushroomCapSurface == '選択してください'
+            ? null
+            : _selectedMushroomCapSurface,
+        mushroomCapSize: _selectedMushroomCapSize == '選択してください'
+            ? null
+            : _selectedMushroomCapSize,
+        mushroomCapUnderStructure:
+            _selectedMushroomCapUnderStructure == '選択してください'
+                ? null
+                : _selectedMushroomCapUnderStructure,
+        mushroomGillFeature: _selectedMushroomGillFeature == '選択してください'
+            ? null
+            : _selectedMushroomGillFeature,
+        mushroomStemPresence: _selectedMushroomStemPresence == '選択してください'
+            ? null
+            : _selectedMushroomStemPresence,
+        mushroomStemShape: _selectedMushroomStemShape == '選択してください'
+            ? null
+            : _selectedMushroomStemShape,
+        mushroomStemColor: _selectedMushroomStemColor == '選択してください'
+            ? null
+            : _selectedMushroomStemColor,
+        mushroomStemSurface: _selectedMushroomStemSurface == '選択してください'
+            ? null
+            : _selectedMushroomStemSurface,
+        mushroomRingPresence: _selectedMushroomRingPresence == '選択してください'
+            ? null
+            : _selectedMushroomRingPresence,
+        mushroomVolvaPresence: _selectedMushroomVolvaPresence == '選択してください'
+            ? null
+            : _selectedMushroomVolvaPresence,
+        mushroomHabitat: _selectedMushroomHabitat == '選択してください'
+            ? null
+            : _selectedMushroomHabitat,
+        mushroomGrowthPattern: _selectedMushroomGrowthPattern == '選択してください'
+            ? null
+            : _selectedMushroomGrowthPattern,
       );
 
       await DatabaseHelper.instance.create(memo);
@@ -334,6 +533,33 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
   String _formatDateTime(DateTime? dateTime) {
     if (dateTime == null) return '未設定';
     return '${dateTime.year}/${dateTime.month.toString().padLeft(2, '0')}/${dateTime.day.toString().padLeft(2, '0')} ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _getMushroomDetailsSummary() {
+    final details = <String>[];
+
+    if (_selectedMushroomCapShape != null &&
+        _selectedMushroomCapShape != '選択してください') {
+      details.add('傘: ${_selectedMushroomCapShape}');
+    }
+    if (_selectedMushroomCapColor != null &&
+        _selectedMushroomCapColor != '選択してください') {
+      details.add('色: ${_selectedMushroomCapColor}');
+    }
+    if (_selectedMushroomStemPresence != null &&
+        _selectedMushroomStemPresence != '選択してください') {
+      details.add('柄: ${_selectedMushroomStemPresence}');
+    }
+    if (_selectedMushroomHabitat != null &&
+        _selectedMushroomHabitat != '選択してください') {
+      details.add('発生場所: ${_selectedMushroomHabitat}');
+    }
+
+    if (details.isEmpty) {
+      return '';
+    }
+
+    return '\n• キノコ詳細: ${details.join(', ')}${details.length < 4 ? ' など' : ''}';
   }
 
   /// Web環境でHTTPS接続かどうかを確認
@@ -365,7 +591,8 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
     // 部分一致をチェック（キーワードベース）
     final categoryMap = {
-      '植物': ['植物', '草', '木', '花', '葉', '樹', '草本', '木本', '藻類', '菌類', 'しょくぶつ'],
+      '植物': ['植物', '草', '木', '花', '葉', '樹', '草本', '木本', '藻類', 'しょくぶつ'],
+      'キノコ': ['キノコ', 'きのこ', '茸', '菌類', 'マッシュルーム', '菌', 'カビ', '真菌', 'きんるい'],
       '動物': ['動物', '哺乳類', '鳥', '魚', '両生類', '爬虫類', 'どうぶつ'],
       '昆虫': [
         '昆虫',
@@ -1218,10 +1445,366 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
               onChanged: (value) {
                 setState(() {
                   _selectedCategory = value;
+                  // カテゴリが変更された場合、キノコの詳細情報をリセット
+                  if (value != 'キノコ') {
+                    _selectedMushroomCapShape = null;
+                    _selectedMushroomCapColor = null;
+                    _selectedMushroomCapSurface = null;
+                    _selectedMushroomCapSize = null;
+                    _selectedMushroomCapUnderStructure = null;
+                    _selectedMushroomGillFeature = null;
+                    _selectedMushroomStemPresence = null;
+                    _selectedMushroomStemShape = null;
+                    _selectedMushroomStemColor = null;
+                    _selectedMushroomStemSurface = null;
+                    _selectedMushroomRingPresence = null;
+                    _selectedMushroomVolvaPresence = null;
+                    _selectedMushroomHabitat = null;
+                    _selectedMushroomGrowthPattern = null;
+                  }
                 });
               },
             ),
             const SizedBox(height: 16),
+
+            // キノコが選択された場合の詳細フィールド
+            if (_selectedCategory == 'キノコ') ...[
+              Card(
+                color: Colors.orange.shade50,
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.eco, color: Colors.orange.shade700),
+                          const SizedBox(width: 8),
+                          Text(
+                            'キノコの詳細情報',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                              color: Colors.orange.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+
+                      // 傘の形
+                      DropdownButtonFormField<String>(
+                        value: _selectedMushroomCapShape,
+                        decoration: const InputDecoration(
+                          labelText: '傘の形',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _mushroomCapShapeOptions.map((shape) {
+                          return DropdownMenuItem(
+                            value: shape,
+                            child: Text(shape),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedMushroomCapShape = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+
+                      // 傘の色
+                      DropdownButtonFormField<String>(
+                        value: _selectedMushroomCapColor,
+                        decoration: const InputDecoration(
+                          labelText: '傘の色（主な色）',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _mushroomCapColorOptions.map((color) {
+                          return DropdownMenuItem(
+                            value: color,
+                            child: Text(color),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedMushroomCapColor = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+
+                      // 傘の表面
+                      DropdownButtonFormField<String>(
+                        value: _selectedMushroomCapSurface,
+                        decoration: const InputDecoration(
+                          labelText: '傘の表面',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _mushroomCapSurfaceOptions.map((surface) {
+                          return DropdownMenuItem(
+                            value: surface,
+                            child: Text(surface),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedMushroomCapSurface = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+
+                      // 傘の大きさ
+                      DropdownButtonFormField<String>(
+                        value: _selectedMushroomCapSize,
+                        decoration: const InputDecoration(
+                          labelText: '傘の大きさ（直径目安）',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _mushroomCapSizeOptions.map((size) {
+                          return DropdownMenuItem(
+                            value: size,
+                            child: Text(size),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedMushroomCapSize = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+
+                      // 傘裏面の構造
+                      DropdownButtonFormField<String>(
+                        value: _selectedMushroomCapUnderStructure,
+                        decoration: const InputDecoration(
+                          labelText: '傘裏面の構造',
+                          border: OutlineInputBorder(),
+                        ),
+                        items:
+                            _mushroomCapUnderStructureOptions.map((structure) {
+                          return DropdownMenuItem(
+                            value: structure,
+                            child: Text(structure),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedMushroomCapUnderStructure = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+
+                      // ヒダの特徴（傘裏面がヒダの場合のみ表示）
+                      if (_selectedMushroomCapUnderStructure == 'ヒダ') ...[
+                        DropdownButtonFormField<String>(
+                          value: _selectedMushroomGillFeature,
+                          decoration: const InputDecoration(
+                            labelText: 'ヒダの特徴',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: _mushroomGillFeatureOptions.map((feature) {
+                            return DropdownMenuItem(
+                              value: feature,
+                              child: Text(feature),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            setState(() {
+                              _selectedMushroomGillFeature = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+
+                      // 柄の有無
+                      DropdownButtonFormField<String>(
+                        value: _selectedMushroomStemPresence,
+                        decoration: const InputDecoration(
+                          labelText: '柄の有無',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _mushroomStemPresenceOptions.map((presence) {
+                          return DropdownMenuItem(
+                            value: presence,
+                            child: Text(presence),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedMushroomStemPresence = value;
+                            // 柄がない場合は柄関連の項目をリセット
+                            if (value == 'なし') {
+                              _selectedMushroomStemShape = null;
+                              _selectedMushroomStemColor = null;
+                              _selectedMushroomStemSurface = null;
+                              _selectedMushroomRingPresence = null;
+                              _selectedMushroomVolvaPresence = null;
+                            }
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+
+                      // 柄がある場合のみ表示される項目
+                      if (_selectedMushroomStemPresence == 'あり') ...[
+                        // 柄の形
+                        DropdownButtonFormField<String>(
+                          value: _selectedMushroomStemShape,
+                          decoration: const InputDecoration(
+                            labelText: '柄の形',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: _mushroomStemShapeOptions.map((shape) {
+                            return DropdownMenuItem(
+                              value: shape,
+                              child: Text(shape),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            setState(() {
+                              _selectedMushroomStemShape = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+
+                        // 柄の色
+                        DropdownButtonFormField<String>(
+                          value: _selectedMushroomStemColor,
+                          decoration: const InputDecoration(
+                            labelText: '柄の色',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: _mushroomStemColorOptions.map((color) {
+                            return DropdownMenuItem(
+                              value: color,
+                              child: Text(color),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            setState(() {
+                              _selectedMushroomStemColor = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+
+                        // 柄表面の状態
+                        DropdownButtonFormField<String>(
+                          value: _selectedMushroomStemSurface,
+                          decoration: const InputDecoration(
+                            labelText: '柄表面の状態',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: _mushroomStemSurfaceOptions.map((surface) {
+                            return DropdownMenuItem(
+                              value: surface,
+                              child: Text(surface),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            setState(() {
+                              _selectedMushroomStemSurface = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+
+                        // つばの有無
+                        DropdownButtonFormField<String>(
+                          value: _selectedMushroomRingPresence,
+                          decoration: const InputDecoration(
+                            labelText: 'つば（柄についている輪）の有無',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: _mushroomRingPresenceOptions.map((presence) {
+                            return DropdownMenuItem(
+                              value: presence,
+                              child: Text(presence),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            setState(() {
+                              _selectedMushroomRingPresence = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+
+                        // つぼの有無
+                        DropdownButtonFormField<String>(
+                          value: _selectedMushroomVolvaPresence,
+                          decoration: const InputDecoration(
+                            labelText: 'つぼ（根元の袋状構造）の有無',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: _mushroomVolvaPresenceOptions.map((presence) {
+                            return DropdownMenuItem(
+                              value: presence,
+                              child: Text(presence),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            setState(() {
+                              _selectedMushroomVolvaPresence = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+
+                      // 発生場所
+                      DropdownButtonFormField<String>(
+                        value: _selectedMushroomHabitat,
+                        decoration: const InputDecoration(
+                          labelText: '発生場所',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _mushroomHabitatOptions.map((habitat) {
+                          return DropdownMenuItem(
+                            value: habitat,
+                            child: Text(habitat),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedMushroomHabitat = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+
+                      // 生育状態
+                      DropdownButtonFormField<String>(
+                        value: _selectedMushroomGrowthPattern,
+                        decoration: const InputDecoration(
+                          labelText: '生育状態',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _mushroomGrowthPatternOptions.map((pattern) {
+                          return DropdownMenuItem(
+                            value: pattern,
+                            child: Text(pattern),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedMushroomGrowthPattern = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
 
             // 発見時間
             InkWell(
@@ -1960,12 +2543,12 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                   const SizedBox(height: 8),
                   Text(
                     '• タイトル: ${_titleController.text.trim().isEmpty ? "未入力" : _titleController.text.trim()}\n'
-                    '• カテゴリ: ${_selectedCategory ?? "未選択"}\n'
+                    '• カテゴリ: ${_selectedCategory ?? "未選択"}${_selectedCategory == 'キノコ' ? " (詳細情報入力済み)" : ""}\n'
                     '• 発見日時: ${_formatDateTime(_discoveryTime)}\n'
                     '• 発見者: ${_discovererController.text.trim().isEmpty ? "未入力" : _discovererController.text.trim()}\n'
                     '• 位置情報: ${_latitude != null && _longitude != null ? "設定済み" : "未設定"}\n'
                     '• 添付画像: ${_imagePaths.length}枚\n'
-                    '• 音声メモ: ${_audioPath != null ? "録音済み (文字起こし可能)" : "なし"}',
+                    '• 音声メモ: ${_audioPath != null ? "録音済み (文字起こし可能)" : "なし"}${_selectedCategory == 'キノコ' ? _getMushroomDetailsSummary() : ""}',
                     style: TextStyle(
                       fontSize: 12,
                       color: Colors.grey.shade700,

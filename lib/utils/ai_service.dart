@@ -199,6 +199,106 @@ class AIService {
     }
   }
 
+  /// Web環境での画像分析用HTTP直接リクエスト
+  static Future<String?> _makeImageAnalysisRequest(Uint8List imageBytes) async {
+    if (!kIsWeb) return null;
+
+    try {
+      print('AI Service Debug: Web環境で画像分析HTTP直接リクエスト開始');
+      print('AI Service Debug: 画像データサイズ: ${imageBytes.length} bytes');
+
+      // 画像をBase64エンコード
+      final base64Image = base64Encode(imageBytes);
+      print('AI Service Debug: Base64エンコード完了');
+
+      final url = Uri.parse(
+          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$_apiKey');
+
+      final requestBody = {
+        'contents': [
+          {
+            'parts': [
+              {
+                'text': '''
+この画像を分析して、フィールドワーク・自然観察記録として以下の項目を提案してください。
+
+【分析対象】
+写真に写っている自然物や現象を詳しく観察し、科学的な記録として適切な情報を抽出してください。
+
+【出力項目】
+1. タイトル: 簡潔で分かりやすい観察対象の名前（例：「ニホンアマガエル」「サクラの開花」）
+2. 内容: 詳細な観察記録（形態、色彩、大きさ、行動、環境など具体的な特徴）
+3. カテゴリ: 以下から最も適切なものを必ず選択
+   - 植物（草本、木本、藻類、菌類など）
+   - 動物（哺乳類、鳥類、魚類、両生類、爬虫類など）
+   - 昆虫（チョウ、ガ、甲虫、ハチ、アリなど）
+   - 鉱物（岩石、鉱物、結晶など）
+   - 化石（植物化石、動物化石など）
+   - 地形（地質構造、地層、地形特徴など）
+   - その他（上記に当てはまらないもの）
+4. 備考: 今後の観察で注意すべき点、関連する生態情報、季節性など
+
+【注意事項】
+- カテゴリは必ず上記7つの中から日本語で正確に選択してください
+- 不明な場合は「その他」を選択してください
+- 科学的な正確性を重視し、推測の場合はその旨を明記してください
+
+【出力フォーマット】
+以下のJSON形式で回答してください（他の文章は一切含めないでください）：
+{
+  "title": "観察対象の名前",
+  "content": "詳細な観察記録と特徴",
+  "category": "植物",
+  "notes": "備考・追加情報"
+}
+'''
+              },
+              {
+                'inline_data': {'mime_type': 'image/jpeg', 'data': base64Image}
+              }
+            ]
+          }
+        ],
+        'generationConfig': {
+          'temperature': 0.7,
+          'topP': 0.95,
+          'maxOutputTokens': 2048,
+        }
+      };
+
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'User-Agent': 'location_memo/1.0',
+        },
+        body: json.encode(requestBody),
+      );
+
+      print(
+          'AI Service Debug: 画像分析HTTP直接リクエスト レスポンス状態: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        final text =
+            responseData['candidates']?[0]?['content']?['parts']?[0]?['text'];
+        print(
+            'AI Service Debug: 画像分析HTTP直接リクエスト 成功: ${text?.substring(0, text.length > 100 ? 100 : text.length)}...');
+        return text;
+      } else {
+        print('AI Service Debug: 画像分析HTTP直接リクエスト 失敗: ${response.statusCode}');
+        print('AI Service Debug: エラーレスポンス: ${response.body}');
+        return null;
+      }
+    } catch (e) {
+      print('AI Service Debug: 画像分析HTTP直接リクエスト エラー詳細:');
+      print('AI Service Debug: エラータイプ: ${e.runtimeType}');
+      print('AI Service Debug: エラーメッセージ: $e');
+      return null;
+    }
+  }
+
   /// API接続テスト
   static Future<bool> testApiConnection() async {
     print('AI Service Debug: API接続テスト開始');
@@ -370,29 +470,33 @@ class AIService {
       };
     }
 
-    // Web環境では画像ファイルの処理が制限されているため、エラーメッセージを返す
-    if (kIsWeb) {
-      print('AI Service Debug: Web環境では画像分析は制限されています');
-      throw Exception(
-          'Web環境では画像分析機能は制限されています。\n\nモバイルアプリまたはデスクトップアプリをご利用ください。\n\n代替案：\n• 画像を見ながら手動でメモを作成\n• テキスト改善機能を活用');
-    }
-
     try {
-      final model = _model;
-      if (model == null) {
-        print('AI Service Debug: 画像分析失敗 - モデルがnull');
-        throw Exception('AIモデルの初期化に失敗しました。');
-      }
-
       print('AI Service Debug: 画像ファイル読み込み中...');
       final imageBytes = await imageFile.readAsBytes();
       print('AI Service Debug: 画像ファイルサイズ: ${imageBytes.length} bytes');
 
-      final imageContent = DataPart('image/jpeg', imageBytes);
+      String? responseText;
 
-      print('AI Service Debug: Gemini APIに画像データ送信中...');
-      final prompt = Content.multi([
-        TextPart('''
+      // Web環境では最初からHTTP直接リクエストを使用
+      if (kIsWeb) {
+        print('AI Service Debug: Web環境でHTTP直接リクエストを使用');
+        responseText = await _makeImageAnalysisRequest(imageBytes);
+        if (responseText == null) {
+          throw Exception('Web環境での画像分析に失敗しました。\n\nAPIキーまたはネットワーク接続を確認してください。');
+        }
+      } else {
+        // ネイティブ環境ではSDKを使用
+        final model = _model;
+        if (model == null) {
+          print('AI Service Debug: 画像分析失敗 - モデルがnull');
+          throw Exception('AIモデルの初期化に失敗しました。');
+        }
+
+        final imageContent = DataPart('image/jpeg', imageBytes);
+
+        print('AI Service Debug: Gemini APIに画像データ送信中...');
+        final prompt = Content.multi([
+          TextPart('''
 この画像を分析して、フィールドワーク・自然観察記録として以下の項目を提案してください。
 
 【分析対象】
@@ -425,29 +529,38 @@ class AIService {
   "notes": "備考・追加情報"
 }
 '''),
-        imageContent,
-      ]);
+          imageContent,
+        ]);
 
-      final response = await model.generateContent([prompt]);
+        final response = await model.generateContent([prompt]);
 
-      print('AI Service Debug: 画像分析レスポンス受信');
-      print('AI Service Debug: レスポンステキスト: ${response.text}');
+        print('AI Service Debug: 画像分析レスポンス受信');
+        print('AI Service Debug: レスポンステキスト: ${response.text}');
 
-      if (response.text != null) {
+        if (response.text == null || response.text!.isEmpty) {
+          print('AI Service Debug: 画像分析失敗 - 空のレスポンス');
+          throw Exception('画像分析結果を取得できませんでした。');
+        }
+
+        responseText = response.text!;
+      }
+
+      // 共通のレスポンス処理
+      if (responseText != null && responseText.isNotEmpty) {
         try {
           // レスポンステキストを取得
-          String responseText = response.text!.trim();
+          String cleanedText = responseText.trim();
 
           // JSONブロックを抽出（```json``` や余分なテキストを除去）
-          final jsonMatch = RegExp(r'\{[\s\S]*\}').firstMatch(responseText);
+          final jsonMatch = RegExp(r'\{[\s\S]*\}').firstMatch(cleanedText);
           if (jsonMatch != null) {
-            responseText = jsonMatch.group(0)!;
-            print('AI Service Debug: JSON抽出成功: $responseText');
+            cleanedText = jsonMatch.group(0)!;
+            print('AI Service Debug: JSON抽出成功: $cleanedText');
           } else {
             print('AI Service Debug: JSON抽出失敗、生テキストを使用');
           }
 
-          final jsonResponse = json.decode(responseText);
+          final jsonResponse = json.decode(cleanedText);
 
           // 必須フィールドの検証とデフォルト値設定
           final result = {
@@ -461,14 +574,13 @@ class AIService {
           return result;
         } catch (e) {
           print('AI Service Debug: JSON解析エラー: $e');
-          print('AI Service Debug: レスポンステキスト: ${response.text}');
+          print('AI Service Debug: レスポンステキスト: $responseText');
 
           // JSONパースに失敗した場合は、生テキストから情報を抽出
-          final text = response.text!;
           final fallbackResult = {
-            'title': _extractTitleFromText(text),
-            'content': _extractContentFromText(text),
-            'category': _extractCategoryFromText(text),
+            'title': _extractTitleFromText(responseText),
+            'content': _extractContentFromText(responseText),
+            'category': _extractCategoryFromText(responseText),
             'notes': 'AI分析による提案（JSON解析失敗のため手動抽出）',
           };
 

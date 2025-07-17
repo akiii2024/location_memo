@@ -40,7 +40,7 @@ class DatabaseHelper {
     final path = join(dbPath, filePath);
 
     return await openDatabase(path,
-        version: 7, onCreate: _createDB, onUpgrade: _upgradeDB);
+        version: 8, onCreate: _createDB, onUpgrade: _upgradeDB);
   }
 
   Future _createDB(Database db, int version) async {
@@ -65,7 +65,21 @@ CREATE TABLE memos (
   mapId $intType,
   pinNumber $intType,
   audioPath $textNullType,
-  imagePaths $textNullType
+  imagePaths $textNullType,
+  mushroomCapShape $textNullType,
+  mushroomCapColor $textNullType,
+  mushroomCapSurface $textNullType,
+  mushroomCapSize $textNullType,
+  mushroomCapUnderStructure $textNullType,
+  mushroomGillFeature $textNullType,
+  mushroomStemPresence $textNullType,
+  mushroomStemShape $textNullType,
+  mushroomStemColor $textNullType,
+  mushroomStemSurface $textNullType,
+  mushroomRingPresence $textNullType,
+  mushroomVolvaPresence $textNullType,
+  mushroomHabitat $textNullType,
+  mushroomGrowthPattern $textNullType
 )
 ''');
 
@@ -107,6 +121,28 @@ CREATE TABLE maps (
     if (oldVersion < 7) {
       await db.execute('ALTER TABLE memos ADD COLUMN imagePaths TEXT');
     }
+    if (oldVersion < 8) {
+      // キノコ詳細情報フィールドを追加
+      await db.execute('ALTER TABLE memos ADD COLUMN mushroomCapShape TEXT');
+      await db.execute('ALTER TABLE memos ADD COLUMN mushroomCapColor TEXT');
+      await db.execute('ALTER TABLE memos ADD COLUMN mushroomCapSurface TEXT');
+      await db.execute('ALTER TABLE memos ADD COLUMN mushroomCapSize TEXT');
+      await db.execute(
+          'ALTER TABLE memos ADD COLUMN mushroomCapUnderStructure TEXT');
+      await db.execute('ALTER TABLE memos ADD COLUMN mushroomGillFeature TEXT');
+      await db
+          .execute('ALTER TABLE memos ADD COLUMN mushroomStemPresence TEXT');
+      await db.execute('ALTER TABLE memos ADD COLUMN mushroomStemShape TEXT');
+      await db.execute('ALTER TABLE memos ADD COLUMN mushroomStemColor TEXT');
+      await db.execute('ALTER TABLE memos ADD COLUMN mushroomStemSurface TEXT');
+      await db
+          .execute('ALTER TABLE memos ADD COLUMN mushroomRingPresence TEXT');
+      await db
+          .execute('ALTER TABLE memos ADD COLUMN mushroomVolvaPresence TEXT');
+      await db.execute('ALTER TABLE memos ADD COLUMN mushroomHabitat TEXT');
+      await db
+          .execute('ALTER TABLE memos ADD COLUMN mushroomGrowthPattern TEXT');
+    }
   }
 
   Future<Memo> create(Memo memo) async {
@@ -128,6 +164,21 @@ CREATE TABLE maps (
         mapId: memo.mapId,
         audioPath: memo.audioPath,
         imagePaths: memo.imagePaths,
+        // キノコ詳細情報
+        mushroomCapShape: memo.mushroomCapShape,
+        mushroomCapColor: memo.mushroomCapColor,
+        mushroomCapSurface: memo.mushroomCapSurface,
+        mushroomCapSize: memo.mushroomCapSize,
+        mushroomCapUnderStructure: memo.mushroomCapUnderStructure,
+        mushroomGillFeature: memo.mushroomGillFeature,
+        mushroomStemPresence: memo.mushroomStemPresence,
+        mushroomStemShape: memo.mushroomStemShape,
+        mushroomStemColor: memo.mushroomStemColor,
+        mushroomStemSurface: memo.mushroomStemSurface,
+        mushroomRingPresence: memo.mushroomRingPresence,
+        mushroomVolvaPresence: memo.mushroomVolvaPresence,
+        mushroomHabitat: memo.mushroomHabitat,
+        mushroomGrowthPattern: memo.mushroomGrowthPattern,
       );
     } else {
       final db = await instance.database;
@@ -191,7 +242,21 @@ CREATE TABLE maps (
           'mapId',
           'pinNumber',
           'audioPath',
-          'imagePaths'
+          'imagePaths',
+          'mushroomCapShape',
+          'mushroomCapColor',
+          'mushroomCapSurface',
+          'mushroomCapSize',
+          'mushroomCapUnderStructure',
+          'mushroomGillFeature',
+          'mushroomStemPresence',
+          'mushroomStemShape',
+          'mushroomStemColor',
+          'mushroomStemSurface',
+          'mushroomRingPresence',
+          'mushroomVolvaPresence',
+          'mushroomHabitat',
+          'mushroomGrowthPattern'
         ],
         where: 'id = ?',
         whereArgs: [id],

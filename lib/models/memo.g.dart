@@ -31,13 +31,27 @@ class MemoAdapter extends TypeAdapter<Memo> {
       mapId: fields[11] as int?,
       audioPath: fields[12] as String?,
       imagePaths: (fields[13] as List?)?.cast<String>(),
+      mushroomCapShape: fields[14] as String?,
+      mushroomCapColor: fields[15] as String?,
+      mushroomCapSurface: fields[16] as String?,
+      mushroomCapSize: fields[17] as String?,
+      mushroomCapUnderStructure: fields[18] as String?,
+      mushroomGillFeature: fields[19] as String?,
+      mushroomStemPresence: fields[20] as String?,
+      mushroomStemShape: fields[21] as String?,
+      mushroomStemColor: fields[22] as String?,
+      mushroomStemSurface: fields[23] as String?,
+      mushroomRingPresence: fields[24] as String?,
+      mushroomVolvaPresence: fields[25] as String?,
+      mushroomHabitat: fields[26] as String?,
+      mushroomGrowthPattern: fields[27] as String?,
     );
   }
 
   @override
   void write(BinaryWriter writer, Memo obj) {
     writer
-      ..writeByte(14)
+      ..writeByte(28)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -65,7 +79,35 @@ class MemoAdapter extends TypeAdapter<Memo> {
       ..writeByte(12)
       ..write(obj.audioPath)
       ..writeByte(13)
-      ..write(obj.imagePaths);
+      ..write(obj.imagePaths)
+      ..writeByte(14)
+      ..write(obj.mushroomCapShape)
+      ..writeByte(15)
+      ..write(obj.mushroomCapColor)
+      ..writeByte(16)
+      ..write(obj.mushroomCapSurface)
+      ..writeByte(17)
+      ..write(obj.mushroomCapSize)
+      ..writeByte(18)
+      ..write(obj.mushroomCapUnderStructure)
+      ..writeByte(19)
+      ..write(obj.mushroomGillFeature)
+      ..writeByte(20)
+      ..write(obj.mushroomStemPresence)
+      ..writeByte(21)
+      ..write(obj.mushroomStemShape)
+      ..writeByte(22)
+      ..write(obj.mushroomStemColor)
+      ..writeByte(23)
+      ..write(obj.mushroomStemSurface)
+      ..writeByte(24)
+      ..write(obj.mushroomRingPresence)
+      ..writeByte(25)
+      ..write(obj.mushroomVolvaPresence)
+      ..writeByte(26)
+      ..write(obj.mushroomHabitat)
+      ..writeByte(27)
+      ..write(obj.mushroomGrowthPattern);
   }
 
   @override
