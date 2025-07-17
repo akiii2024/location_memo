@@ -454,17 +454,11 @@ class AIService {
     }
   }
 
-  /// 画像を分析してメモの内容を提案
-  static Future<Map<String, String?>> analyzeImage(File imageFile) async {
-    print('AI Service Debug: 画像分析開始');
-    print('AI Service Debug: 画像ファイルパス: ${imageFile.path}');
-
-    // Web環境ではBlobURLのexists()チェックでエラーが発生するためスキップ
-    if (!kIsWeb) {
-      print('AI Service Debug: 画像ファイル存在: ${await imageFile.exists()}');
-    } else {
-      print('AI Service Debug: Web環境 - ファイル存在チェックをスキップ');
-    }
+  /// 画像データ（Uint8List）を分析してメモの内容を提案
+  static Future<Map<String, String?>> analyzeImageBytes(
+      Uint8List imageBytes) async {
+    print('AI Service Debug: 画像分析開始（バイト配列）');
+    print('AI Service Debug: 画像データサイズ: ${imageBytes.length} bytes');
 
     if (!isConfigured) {
       print('AI Service Debug: 画像分析失敗 - 設定されていません');
@@ -477,10 +471,6 @@ class AIService {
     }
 
     try {
-      print('AI Service Debug: 画像ファイル読み込み中...');
-      final imageBytes = await imageFile.readAsBytes();
-      print('AI Service Debug: 画像ファイルサイズ: ${imageBytes.length} bytes');
-
       String? responseText;
 
       // Web環境では最初からHTTP直接リクエストを使用
@@ -618,6 +608,34 @@ class AIService {
       } else {
         throw Exception('画像分析に失敗しました: ${e.toString()}');
       }
+    }
+  }
+
+  /// 画像ファイルを分析してメモの内容を提案（Fileから直接）
+  static Future<Map<String, String?>> analyzeImage(File imageFile) async {
+    print('AI Service Debug: 画像分析開始（ファイルから）');
+    print('AI Service Debug: 画像ファイルパス: ${imageFile.path}');
+
+    // Web環境ではBlobURLのexists()チェックでエラーが発生するためスキップ
+    if (!kIsWeb) {
+      print('AI Service Debug: 画像ファイル存在: ${await imageFile.exists()}');
+    } else {
+      print('AI Service Debug: Web環境 - ファイル存在チェックをスキップ');
+    }
+
+    try {
+      print('AI Service Debug: 画像ファイル読み込み中...');
+      final imageBytes = await imageFile.readAsBytes();
+      print('AI Service Debug: 画像ファイルサイズ: ${imageBytes.length} bytes');
+
+      // バイト配列版のメソッドを呼び出す
+      return await analyzeImageBytes(imageBytes);
+    } catch (e) {
+      print('AI Service Debug: Fileからの画像分析でエラー: ${e.runtimeType}');
+      print('AI Service Debug: エラーメッセージ: $e');
+
+      // エラーをそのまま再投げ（詳細なエラーハンドリングはanalyzeImageBytesで行う）
+      rethrow;
     }
   }
 

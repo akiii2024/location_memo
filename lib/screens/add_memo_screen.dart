@@ -685,7 +685,19 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
         if (AIService.isConfigured) {
           try {
-            final analysis = await AIService.analyzeImage(_selectedImage!);
+            Map<String, String?> analysis;
+
+            // Web環境では XFile から直接バイト配列を取得して分析
+            if (kIsWeb) {
+              print('AddMemo Debug: Web環境で XFile から直接バイト配列を取得');
+              final imageBytes = await image.readAsBytes();
+              print('AddMemo Debug: 画像バイト配列サイズ: ${imageBytes.length}');
+              analysis = await AIService.analyzeImageBytes(imageBytes);
+            } else {
+              // ネイティブ環境では従来通り File を使用
+              print('AddMemo Debug: ネイティブ環境で File を使用');
+              analysis = await AIService.analyzeImage(_selectedImage!);
+            }
 
             List<String> updatedFields = [];
 
