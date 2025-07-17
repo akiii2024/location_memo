@@ -137,7 +137,10 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _screens[_currentIndex],
+      body: SafeArea(
+        // iPhoneのホームバーやステータスバーを避けてUIを描画
+        child: _screens[_currentIndex],
+      ),
       bottomNavigationBar: SafeArea(
         // PWA環境でのタッチ反応問題を解決するため、パディング計算を簡素化
         minimum: EdgeInsets.only(
