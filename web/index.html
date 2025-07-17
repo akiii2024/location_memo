@@ -33,7 +33,14 @@
   <title>Location Memo</title>
   <link rel="manifest" href="manifest.json">
   <style>
+    /* View-Transition 自体を作らせない（既に追加済）*/
     @view-transition { navigation: none; }
+
+    /* 万一残留した場合に備えてポインタも殺す */
+    html::view-transition-old(root),
+    html::view-transition-new(root){
+      pointer-events:none !important;
+    }
   </style>
 </head>
 <body>
