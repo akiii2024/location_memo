@@ -16,12 +16,14 @@ class AddMemoScreen extends StatefulWidget {
   final double? initialLatitude;
   final double? initialLongitude;
   final int? mapId;
+  final int? layer;
 
   const AddMemoScreen({
     Key? key,
     this.initialLatitude,
     this.initialLongitude,
     this.mapId,
+    this.layer,
   }) : super(key: key);
 
   @override
@@ -43,6 +45,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
   DateTime? _discoveryTime;
   String? _selectedCategory;
   int? _selectedMapId;
+  int? _layer;
   List<MapInfo> _maps = [];
 
   // AI機能用の状態変数
@@ -95,6 +98,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
     _latitude = widget.initialLatitude;
     _longitude = widget.initialLongitude;
     _selectedMapId = widget.mapId; // 渡された地図IDを設定
+    _layer = widget.layer; // 現在のレイヤーを設定
     _discoveryTime = DateTime.now(); // デフォルトで現在時刻を設定
     _selectedCategory = _categories[0]; // デフォルトで最初のカテゴリを選択
     _loadMaps();
@@ -301,9 +305,12 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
       // 同じ地図の既存のメモを取得して次のピン番号を決定
       final existingMemos =
           await DatabaseHelper.instance.readMemosByMapId(_selectedMapId);
+      final layerMemos = existingMemos
+          .where((memo) => (memo.layer ?? 0) == (_layer ?? 0))
+          .toList();
       int nextPinNumber = 1;
-      if (existingMemos.isNotEmpty) {
-        final maxPinNumber = existingMemos
+      if (layerMemos.isNotEmpty) {
+        final maxPinNumber = layerMemos
             .where((memo) => memo.pinNumber != null)
             .map((memo) => memo.pinNumber!)
             .fold(0, (max, number) => number > max ? number : max);
@@ -329,6 +336,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
             : _notesController.text.trim(),
         pinNumber: nextPinNumber, // 自動的に次の番号を割り当て
         mapId: _selectedMapId, // 選択された地図ID
+        layer: _layer, // レイヤー番号
         audioPath: _audioPath, // 音声ファイルのパス
         imagePaths: _imagePaths.isNotEmpty ? _imagePaths : null, // 画像パス配列
         // キノコ詳細情報（「選択してください」は保存しない）

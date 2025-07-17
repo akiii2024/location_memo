@@ -4,9 +4,12 @@ import 'package:location_memo/screens/main_screen.dart';
 import 'package:location_memo/screens/splash_screen.dart';
 import 'package:location_memo/utils/theme_provider.dart';
 import 'package:location_memo/utils/app_info.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Hive 初期化（永続データ用）
+  await Hive.initFlutter();
   await AppInfo.init();
   runApp(const MyApp());
 }

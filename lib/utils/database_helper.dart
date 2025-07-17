@@ -39,8 +39,21 @@ class DatabaseHelper {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
-    return await openDatabase(path,
-        version: 8, onCreate: _createDB, onUpgrade: _upgradeDB);
+    final db = await openDatabase(path,
+        version: 9, onCreate: _createDB, onUpgrade: _upgradeDB);
+
+    // レイヤー列が存在しない場合は追加
+    await _ensureLayerColumn(db);
+
+    return db;
+  }
+
+  Future<void> _ensureLayerColumn(Database db) async {
+    final result = await db.rawQuery('PRAGMA table_info(memos)');
+    final hasLayer = result.any((row) => row['name'] == 'layer');
+    if (!hasLayer) {
+      await db.execute('ALTER TABLE memos ADD COLUMN layer INTEGER');
+    }
   }
 
   Future _createDB(Database db, int version) async {
@@ -79,7 +92,8 @@ CREATE TABLE memos (
   mushroomRingPresence $textNullType,
   mushroomVolvaPresence $textNullType,
   mushroomHabitat $textNullType,
-  mushroomGrowthPattern $textNullType
+  mushroomGrowthPattern $textNullType,
+  layer $intType
 )
 ''');
 
@@ -143,6 +157,9 @@ CREATE TABLE maps (
       await db
           .execute('ALTER TABLE memos ADD COLUMN mushroomGrowthPattern TEXT');
     }
+    if (oldVersion < 9) {
+      await db.execute('ALTER TABLE memos ADD COLUMN layer INTEGER');
+    }
   }
 
   Future<Memo> create(Memo memo) async {
@@ -179,6 +196,7 @@ CREATE TABLE maps (
         mushroomVolvaPresence: memo.mushroomVolvaPresence,
         mushroomHabitat: memo.mushroomHabitat,
         mushroomGrowthPattern: memo.mushroomGrowthPattern,
+        layer: memo.layer,
       );
     } else {
       final db = await instance.database;

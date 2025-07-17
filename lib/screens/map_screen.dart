@@ -24,14 +24,70 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen> {
   List<Memo> _memos = [];
   String? _customMapPath;
+  int _currentLayer = 0; // 現在選択されているレイヤー
+  List<int> _layers = [0]; // 利用可能なレイヤー一覧
   final GlobalKey<CustomMapWidgetState> _mapWidgetKey =
       GlobalKey<CustomMapWidgetState>();
+  Box? _layerNameBox; // レイヤー名ボックス
+
+  String _layerDisplayName(int layer) {
+    if (_layerNameBox == null) {
+      return 'レイヤー${layer + 1}';
+    }
+    final key = _layerKey(layer);
+    final saved = _layerNameBox!.get(key);
+    return saved ?? 'レイヤー${layer + 1}';
+  }
+
+  String _layerKey(int layer) {
+    final mapIdPart =
+        widget.mapInfo?.id?.toString() ?? (_customMapPath ?? 'custom');
+    return '${mapIdPart}_$layer';
+  }
+
+  Future<void> _renameCurrentLayer() async {
+    final controller =
+        TextEditingController(text: _layerDisplayName(_currentLayer));
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('レイヤー名を変更'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: '新しいレイヤー名'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('キャンセル'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (newName != null && newName.isNotEmpty) {
+      if (_layerNameBox != null) {
+        await _layerNameBox!.put(_layerKey(_currentLayer), newName);
+      }
+      setState(() {});
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     _loadMemos();
     _loadCustomMapPath();
+
+    // レイヤー名保存用のBoxを初期化
+    Hive.openBox('layer_names').then((box) {
+      setState(() {
+        _layerNameBox = box;
+      });
+    });
 
     // MapInfoに画像パスがある場合はカスタム地図を使用
     if (widget.mapInfo?.imagePath != null) {
@@ -77,8 +133,16 @@ class _MapScreenState extends State<MapScreen> {
       memos = await DatabaseHelper.instance.readMemosByMapPath(_customMapPath);
     }
 
+    // レイヤー一覧を更新
+    final layerSet = memos.map((m) => m.layer ?? 0).toSet();
+    if (!layerSet.contains(0)) layerSet.add(0);
+
     setState(() {
       _memos = memos;
+      _layers = layerSet.toList()..sort();
+      if (!_layers.contains(_currentLayer)) {
+        _currentLayer = _layers.first;
+      }
     });
   }
 
@@ -103,6 +167,7 @@ class _MapScreenState extends State<MapScreen> {
           initialLatitude: x,
           initialLongitude: y,
           mapId: currentMapId,
+          layer: _currentLayer,
         ),
       ),
     );
@@ -127,8 +192,58 @@ class _MapScreenState extends State<MapScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.mapInfo?.title ?? 'フィールドワーク記録'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.mapInfo?.title ?? 'フィールドワーク記録'),
+            Text(_layerDisplayName(_currentLayer),
+                style: const TextStyle(fontSize: 12)),
+          ],
+        ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.edit),
+            tooltip: 'レイヤー名を変更',
+            onPressed: _renameCurrentLayer,
+          ),
+          // レイヤー選択ボタン
+          PopupMenuButton<int>(
+            icon: const Icon(Icons.layers),
+            tooltip: 'レイヤー選択',
+            onSelected: (value) {
+              if (value == -1) {
+                // 新しいレイヤーを追加
+                final newLayer = (_layers.isNotEmpty ? _layers.last + 1 : 1);
+                setState(() {
+                  _layers.add(newLayer);
+                  _currentLayer = newLayer;
+                });
+              } else {
+                setState(() {
+                  _currentLayer = value;
+                });
+              }
+            },
+            itemBuilder: (context) => [
+              ..._layers.map(
+                (layer) => PopupMenuItem<int>(
+                  value: layer,
+                  child: Text(_layerDisplayName(layer)),
+                ),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem<int>(
+                value: -1,
+                child: Row(
+                  children: [
+                    Icon(Icons.add),
+                    SizedBox(width: 8),
+                    Text('レイヤーを追加'),
+                  ],
+                ),
+              ),
+            ],
+          ),
           // 印刷ボタン
           PopupMenuButton<String>(
             icon: const Icon(Icons.print),
@@ -144,7 +259,9 @@ class _MapScreenState extends State<MapScreen> {
                     if (mapState != null) {
                       await PrintHelper.printMapWithPins(
                         mapState.mapImagePath,
-                        _memos,
+                        _memos
+                            .where((m) => (m.layer ?? 0) == _currentLayer)
+                            .toList(),
                         mapState.actualDisplayWidth,
                         mapState.actualDisplayHeight,
                       );
@@ -152,17 +269,24 @@ class _MapScreenState extends State<MapScreen> {
                       // フォールバック: デフォルトサイズを使用
                       await PrintHelper.printMapWithPins(
                         _customMapPath,
-                        _memos,
+                        _memos
+                            .where((m) => (m.layer ?? 0) == _currentLayer)
+                            .toList(),
                         800.0,
                         600.0,
                       );
                     }
                     break;
                   case 'print_list':
-                    await PrintHelper.printMemoList(_memos);
+                    await PrintHelper.printMemoList(_memos
+                        .where((m) => (m.layer ?? 0) == _currentLayer)
+                        .toList());
                     break;
                   case 'save_pdf':
-                    await PrintHelper.savePdfReport(_memos,
+                    await PrintHelper.savePdfReport(
+                        _memos
+                            .where((m) => (m.layer ?? 0) == _currentLayer)
+                            .toList(),
                         mapImagePath: _customMapPath);
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('PDFファイルを保存しました')),
@@ -246,7 +370,9 @@ class _MapScreenState extends State<MapScreen> {
                 context,
                 MaterialPageRoute(
                   builder: (context) => MemoListScreen(
-                    memos: _memos,
+                    memos: _memos
+                        .where((m) => (m.layer ?? 0) == _currentLayer)
+                        .toList(),
                     mapTitle: widget.mapInfo?.title ?? 'カスタム地図',
                   ),
                 ),
@@ -258,7 +384,7 @@ class _MapScreenState extends State<MapScreen> {
       ),
       body: CustomMapWidget(
         key: _mapWidgetKey,
-        memos: _memos,
+        memos: _memos.where((m) => (m.layer ?? 0) == _currentLayer).toList(),
         onTap: _onMapTap,
         onMemoTap: _onMemoTap,
         customImagePath: _customMapPath,
@@ -286,6 +412,7 @@ class _MapScreenState extends State<MapScreen> {
                 initialLatitude: 0.5, // 地図の中心
                 initialLongitude: 0.5,
                 mapId: currentMapId,
+                layer: _currentLayer,
               ),
             ),
           );

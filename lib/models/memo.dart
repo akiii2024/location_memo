@@ -34,6 +34,8 @@ class Memo {
   String? audioPath; // 音声ファイルのパス
   @HiveField(13)
   List<String>? imagePaths; // 画像パス配列を追加
+  @HiveField(28)
+  int? layer; // レイヤー番号を追加
 
   // キノコ詳細情報フィールド
   @HiveField(14)
@@ -96,6 +98,7 @@ class Memo {
     this.mushroomVolvaPresence,
     this.mushroomHabitat,
     this.mushroomGrowthPattern,
+    this.layer, // レイヤー番号
   });
 
   Map<String, dynamic> toMap() {
@@ -130,6 +133,7 @@ class Memo {
       'mushroomVolvaPresence': mushroomVolvaPresence,
       'mushroomHabitat': mushroomHabitat,
       'mushroomGrowthPattern': mushroomGrowthPattern,
+      if (layer != null) 'layer': layer, // レイヤー番号を保存（存在する場合）
     };
   }
 
@@ -169,6 +173,7 @@ class Memo {
       mushroomVolvaPresence: map['mushroomVolvaPresence'],
       mushroomHabitat: map['mushroomHabitat'],
       mushroomGrowthPattern: map['mushroomGrowthPattern'],
+      layer: map['layer'], // レイヤー番号を読み込み
     );
   }
 }
