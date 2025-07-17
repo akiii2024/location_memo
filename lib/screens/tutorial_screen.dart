@@ -63,8 +63,11 @@ class _TutorialScreenState extends State<TutorialScreen> {
                   child: Text(
                     'スキップ',
                     style: TextStyle(
-                      color: theme.primaryColor,
+                      color: theme.brightness == Brightness.dark
+                          ? Colors.white.withOpacity(0.8)
+                          : theme.primaryColor,
                       fontSize: 16,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
@@ -96,6 +99,7 @@ class _TutorialScreenState extends State<TutorialScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: List.generate(_totalPages, (index) {
+                      final isDark = theme.brightness == Brightness.dark;
                       return Container(
                         margin: const EdgeInsets.symmetric(horizontal: 4),
                         width: 8,
@@ -104,7 +108,9 @@ class _TutorialScreenState extends State<TutorialScreen> {
                           shape: BoxShape.circle,
                           color: _currentPage == index
                               ? theme.primaryColor
-                              : theme.primaryColor.withOpacity(0.3),
+                              : (isDark
+                                  ? Colors.white.withOpacity(0.4)
+                                  : theme.primaryColor.withOpacity(0.3)),
                         ),
                       );
                     }),
@@ -123,12 +129,14 @@ class _TutorialScreenState extends State<TutorialScreen> {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
+                        elevation: theme.brightness == Brightness.dark ? 4 : 2,
                       ),
                       child: Text(
                         _currentPage == _totalPages - 1 ? 'はじめる' : '次へ',
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
+                          color: Colors.white,
                         ),
                       ),
                     ),
@@ -206,6 +214,16 @@ class _TutorialScreenState extends State<TutorialScreen> {
     required String details,
     required ThemeData theme,
   }) {
+    // ダークモードでの視認性を向上させるための色調整
+    final isDark = theme.brightness == Brightness.dark;
+    final titleColor =
+        isDark ? Colors.white : theme.textTheme.titleLarge?.color;
+    final descriptionColor =
+        isDark ? Colors.white : theme.textTheme.bodyLarge?.color;
+    final detailsColor = isDark
+        ? Colors.white.withOpacity(0.9)
+        : theme.textTheme.bodyMedium?.color?.withOpacity(0.8);
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 32.0),
       child: Column(
@@ -216,13 +234,21 @@ class _TutorialScreenState extends State<TutorialScreen> {
             width: 120,
             height: 120,
             decoration: BoxDecoration(
-              color: theme.primaryColor.withOpacity(0.1),
+              color: isDark
+                  ? theme.primaryColor.withOpacity(0.3)
+                  : theme.primaryColor.withOpacity(0.1),
               shape: BoxShape.circle,
+              border: isDark
+                  ? Border.all(
+                      color: theme.primaryColor.withOpacity(0.5),
+                      width: 2,
+                    )
+                  : null,
             ),
             child: Icon(
               icon,
               size: 60,
-              color: theme.primaryColor,
+              color: isDark ? Colors.white : theme.primaryColor,
             ),
           ),
           const SizedBox(height: 40),
@@ -233,7 +259,7 @@ class _TutorialScreenState extends State<TutorialScreen> {
             style: TextStyle(
               fontSize: 28,
               fontWeight: FontWeight.bold,
-              color: theme.textTheme.titleLarge?.color,
+              color: titleColor,
               fontFamily: 'NotoSansJP',
             ),
             textAlign: TextAlign.center,
@@ -245,9 +271,10 @@ class _TutorialScreenState extends State<TutorialScreen> {
             description,
             style: TextStyle(
               fontSize: 18,
-              color: theme.textTheme.bodyLarge?.color,
+              color: descriptionColor,
               fontFamily: 'NotoSansJP',
               height: 1.5,
+              fontWeight: FontWeight.w500,
             ),
             textAlign: TextAlign.center,
           ),
@@ -258,7 +285,7 @@ class _TutorialScreenState extends State<TutorialScreen> {
             details,
             style: TextStyle(
               fontSize: 14,
-              color: theme.textTheme.bodyMedium?.color?.withOpacity(0.8),
+              color: detailsColor,
               fontFamily: 'NotoSansJP',
               height: 1.6,
             ),

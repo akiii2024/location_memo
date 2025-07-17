@@ -28,8 +28,7 @@ class _MainScreenState extends State<MainScreen> {
     super.initState();
     // タッチイベント競合を防ぐため、十分な遅延後にダイアログを表示
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // PWA環境でのタッチ反応問題を解決するため、遅延を長めに設定
-      Future.delayed(const Duration(milliseconds: 1500), () {
+      Future.delayed(const Duration(milliseconds: 100), () {
         if (mounted) {
           _checkAndShowAlphaWarningDialog();
         }
@@ -145,10 +144,12 @@ class _MainScreenState extends State<MainScreen> {
         ),
         child: Container(
           decoration: BoxDecoration(
-            color: Theme.of(context).scaffoldBackgroundColor,
+            color: Theme.of(context).bottomNavigationBarTheme.backgroundColor,
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.1),
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.black.withOpacity(0.3)
+                    : Colors.black.withOpacity(0.1),
                 spreadRadius: 0,
                 blurRadius: 4,
                 offset: const Offset(0, -2),
@@ -163,11 +164,15 @@ class _MainScreenState extends State<MainScreen> {
                 _currentIndex = index;
               });
             },
-            // PWA環境での表示を最適化
-            elevation: 0,
-            backgroundColor: Colors.transparent,
-            selectedItemColor: Theme.of(context).primaryColor,
-            unselectedItemColor: Colors.grey,
+            // テーマに合わせた設定
+            elevation:
+                Theme.of(context).bottomNavigationBarTheme.elevation ?? 8,
+            backgroundColor:
+                Theme.of(context).bottomNavigationBarTheme.backgroundColor,
+            selectedItemColor:
+                Theme.of(context).bottomNavigationBarTheme.selectedItemColor,
+            unselectedItemColor:
+                Theme.of(context).bottomNavigationBarTheme.unselectedItemColor,
             // Web環境での高さ調整
             selectedFontSize: kIsWeb ? 10 : 12,
             unselectedFontSize: kIsWeb ? 10 : 12,
