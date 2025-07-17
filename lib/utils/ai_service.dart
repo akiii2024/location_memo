@@ -458,7 +458,13 @@ class AIService {
   static Future<Map<String, String?>> analyzeImage(File imageFile) async {
     print('AI Service Debug: 画像分析開始');
     print('AI Service Debug: 画像ファイルパス: ${imageFile.path}');
-    print('AI Service Debug: 画像ファイル存在: ${await imageFile.exists()}');
+
+    // Web環境ではBlobURLのexists()チェックでエラーが発生するためスキップ
+    if (!kIsWeb) {
+      print('AI Service Debug: 画像ファイル存在: ${await imageFile.exists()}');
+    } else {
+      print('AI Service Debug: Web環境 - ファイル存在チェックをスキップ');
+    }
 
     if (!isConfigured) {
       print('AI Service Debug: 画像分析失敗 - 設定されていません');
