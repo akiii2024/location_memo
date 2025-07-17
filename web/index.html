@@ -33,13 +33,7 @@
   <title>Location Memo</title>
   <link rel="manifest" href="manifest.json">
   <style>
-    /* iOS 17 Safari の View-Transition レイヤがタップを阻害する問題の暫定回避 */
     @view-transition { navigation: none; }
-    html::view-transition-old(root),
-    html::view-transition-new(root) {
-      display: none !important;
-      pointer-events: none !important;
-    }
   </style>
 </head>
 <body>
