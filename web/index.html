@@ -19,21 +19,14 @@
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=Edge">
   <meta name="description" content="位置情報付きメモアプリ - 場所とメモを簡単に記録・管理">
-  <!-- iOS PWA タッチ反応問題を解決するため最適化されたビューポート設定 -->
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no, interactive-widget=resizes-content">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
 
   <!-- PWA meta tags -->
   <meta name="theme-color" content="#219653">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Location Memo">
-  <meta name="msapplication-TileColor" content="#219653">
-  <!-- iOS PWAでのタッチ反応改善のため、タップハイライトを有効化 -->
-  <meta name="msapplication-tap-highlight" content="yes">
-  <!-- PWA表示モードでの最適化 -->
   <meta name="mobile-web-app-capable" content="yes">
-  <!-- iOS Safari PWA タッチ遅延を解決 -->
-  <meta name="apple-touch-fullscreen" content="yes">
 
   <!-- iOS meta tags & icons -->
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
@@ -43,44 +36,28 @@
   <title>Location Memo</title>
   <link rel="manifest" href="manifest.json">
   
-  <!-- PWA表示最適化用CSS - iOS タッチ反応問題を解決 -->
+  <!-- 基本的なPWA最適化用CSS -->
   <style>
-    /* PWA環境での表示最適化 */
     html, body {
       margin: 0;
       padding: 0;
       height: 100%;
       overflow: hidden;
-      /* iOS PWA タッチ遅延を解決 */
+      /* タッチ操作の最適化 */
+      touch-action: manipulation;
       -webkit-touch-callout: none;
       -webkit-user-select: none;
-      -webkit-tap-highlight-color: rgba(0,0,0,0.1);
-      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
     }
     
-    /* PWAモードでの最適化 - ホームバー回避 */
+    /* PWAモードでのホームバー回避 */
     @media (display-mode: standalone) {
       body {
-        /* PWAモードでの安全領域確保 - ホームバーを避ける */
         padding-bottom: env(safe-area-inset-bottom, 0px);
         padding-top: env(safe-area-inset-top, 0px);
         padding-left: env(safe-area-inset-left, 0px);
         padding-right: env(safe-area-inset-right, 0px);
       }
-    }
-    
-    /* iOS Safari専用の調整 - ホームバー対応 */
-    @supports (-webkit-touch-callout: none) {
-      body {
-        padding-bottom: env(safe-area-inset-bottom, 0px);
-        /* iOS PWA タッチ反応改善 */
-        -webkit-overflow-scrolling: touch;
-      }
-    }
-    
-    /* Flutter Web特有の調整 - ホームバー回避 */
-    flt-semantics-host {
-      padding-bottom: env(safe-area-inset-bottom, 0px) !important;
     }
     
     /* タッチターゲットの最適化 */
@@ -89,111 +66,9 @@
       min-width: 44px;
       touch-action: manipulation;
     }
-
-    /* iPhone 15 Pro Max向けの高解像度最適化 */
-    @media screen and (min-width: 430px) and (max-width: 932px) and (-webkit-min-device-pixel-ratio: 3) {
-      html, body {
-        /* 高解像度デバイスでのタッチ精度向上 */
-        touch-action: manipulation;
-        -webkit-touch-callout: none;
-        -webkit-user-select: none;
-      }
-      
-      /* 高解像度デバイスでのタッチターゲット拡大 */
-      button, .clickable, [role="button"] {
-        min-height: 48px;
-        min-width: 48px;
-      }
-      
-      /* Flutter Web要素のタッチ最適化 - ホームバー対応 */
-      flt-semantics-host {
-        touch-action: manipulation !important;
-        padding-bottom: env(safe-area-inset-bottom, 0px) !important;
-      }
-    }
-
-    /* iPhone 15 Pro Max専用の最適化 */
-    @media screen and (width: 430px) and (height: 932px) and (-webkit-min-device-pixel-ratio: 3) {
-      body {
-        /* iPhone 15 Pro Max専用のタッチ最適化とホームバー回避 */
-        touch-action: manipulation;
-        -webkit-touch-callout: none;
-        -webkit-user-select: none;
-        -webkit-tap-highlight-color: transparent;
-        padding-bottom: env(safe-area-inset-bottom, 0px);
-      }
-    }
   </style>
 </head>
 <body>
-  <!-- PWA環境での軽量な調整スクリプト - iOS タッチ反応問題を解決 -->
-  <script>
-    // PWA環境での最小限の表示最適化
-    function initializePWA() {
-      // PWAモードかどうかを検出
-      const isPWA = window.matchMedia('(display-mode: standalone)').matches ||
-                    window.navigator.standalone ||
-                    document.referrer.includes('android-app://');
-      
-      if (isPWA) {
-        console.log('PWA環境で実行中');
-        
-        // iOS Safari特有の調整のみ実行
-        if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
-          console.log('iOS PWA環境での最適化');
-          // iOS PWA タッチ反応改善のための最小限の調整
-          document.body.style.touchAction = 'manipulation';
-          document.body.style.webkitTouchCallout = 'none';
-          
-          // ホームバー回避のための追加設定
-          document.body.style.paddingBottom = 'env(safe-area-inset-bottom, 0px)';
-          
-          // iPhone 15向けの追加最適化
-          const isIPhone15ProMax = window.screen.width === 430 && 
-                                  window.screen.height === 932 && 
-                                  window.devicePixelRatio >= 3;
-          
-          if (isIPhone15ProMax) {
-            console.log('iPhone 15 Pro Max検出 - 追加最適化を適用');
-            
-            // 高解像度デバイスでのタッチ精度向上
-            document.body.style.touchAction = 'manipulation';
-            document.body.style.webkitTouchCallout = 'none';
-            document.body.style.webkitUserSelect = 'none';
-            document.body.style.webkitTapHighlightColor = 'transparent';
-            
-            // Flutter Web要素の最適化
-            const observer = new MutationObserver(function(mutations) {
-              mutations.forEach(function(mutation) {
-                if (mutation.type === 'childList') {
-                  const fltElements = document.querySelectorAll('flt-semantics-host');
-                  fltElements.forEach(function(element) {
-                    element.style.touchAction = 'manipulation';
-                    element.style.webkitTouchCallout = 'none';
-                    element.style.webkitUserSelect = 'none';
-                    element.style.paddingBottom = 'env(safe-area-inset-bottom, 0px)';
-                  });
-                }
-              });
-            });
-            
-            observer.observe(document.body, {
-              childList: true,
-              subtree: true
-            });
-          }
-        }
-      }
-    }
-    
-    // ページ読み込み完了後に一度だけ実行
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initializePWA);
-    } else {
-      initializePWA();
-    }
-  </script>
-  
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
