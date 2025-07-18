@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:location_memo/screens/home_screen.dart';
 import 'package:location_memo/screens/search_screen.dart';
@@ -25,9 +26,13 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
-    // 画面が構築された後にalpha版警告ダイアログを表示
+    // タッチイベント競合を防ぐため、十分な遅延後にダイアログを表示
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkAndShowAlphaWarningDialog();
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) {
+          _checkAndShowAlphaWarningDialog();
+        }
+      });
     });
   }
 
@@ -132,32 +137,65 @@ class _MainScreenState extends State<MainScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: _screens[_currentIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed,
-        currentIndex: _currentIndex,
-        onTap: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'ホーム',
+      bottomNavigationBar: SafeArea(
+        // PWA環境でのタッチ反応問題を解決するため、パディング計算を簡素化
+        minimum: EdgeInsets.only(
+          bottom: kIsWeb ? 4.0 : 0.0, // Web環境では最小限のパディング
+        ),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).bottomNavigationBarTheme.backgroundColor,
+            boxShadow: [
+              BoxShadow(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.black.withOpacity(0.3)
+                    : Colors.black.withOpacity(0.1),
+                spreadRadius: 0,
+                blurRadius: 4,
+                offset: const Offset(0, -2),
+              ),
+            ],
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.search),
-            label: '検索',
+          child: BottomNavigationBar(
+            type: BottomNavigationBarType.fixed,
+            currentIndex: _currentIndex,
+            onTap: (index) {
+              setState(() {
+                _currentIndex = index;
+              });
+            },
+            // テーマに合わせた設定
+            elevation:
+                Theme.of(context).bottomNavigationBarTheme.elevation ?? 8,
+            backgroundColor:
+                Theme.of(context).bottomNavigationBarTheme.backgroundColor,
+            selectedItemColor:
+                Theme.of(context).bottomNavigationBarTheme.selectedItemColor,
+            unselectedItemColor:
+                Theme.of(context).bottomNavigationBarTheme.unselectedItemColor,
+            // Web環境での高さ調整
+            selectedFontSize: kIsWeb ? 10 : 12,
+            unselectedFontSize: kIsWeb ? 10 : 12,
+            items: const [
+              BottomNavigationBarItem(
+                icon: Icon(Icons.home),
+                label: 'ホーム',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.search),
+                label: '検索',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.push_pin),
+                label: 'ピン一覧',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.settings),
+                label: '設定',
+              ),
+            ],
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.push_pin),
-            label: 'ピン一覧',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.settings),
-            label: '設定',
-          ),
-        ],
+        ),
       ),
     );
   }

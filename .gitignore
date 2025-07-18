@@ -10,6 +10,11 @@
 .svn/
 migrate_working_dir/
 
+# Editor backup files
+*~
+*.bak
+*.orig
+
 # IntelliJ related
 *.iml
 *.ipr
@@ -147,6 +152,9 @@ firebase_options.dart
 maps/
 location_data/
 memo_attachments/
+
+# Scripts folder
+scripts/
 
 # Debug logs
 logs/

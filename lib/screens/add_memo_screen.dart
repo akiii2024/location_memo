@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode;
 // import 'package:geolocator/geolocator.dart';  // 一時的に無効化
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
@@ -16,12 +16,14 @@ class AddMemoScreen extends StatefulWidget {
   final double? initialLatitude;
   final double? initialLongitude;
   final int? mapId;
+  final int? layer;
 
   const AddMemoScreen({
     Key? key,
     this.initialLatitude,
     this.initialLongitude,
     this.mapId,
+    this.layer,
   }) : super(key: key);
 
   @override
@@ -43,6 +45,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
   DateTime? _discoveryTime;
   String? _selectedCategory;
   int? _selectedMapId;
+  int? _layer;
   List<MapInfo> _maps = [];
 
   // AI機能用の状態変数
@@ -54,9 +57,14 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
   bool _isPlaying = false;
   bool _isTranscribing = false; // 音声文字起こし中のフラグ
 
+  // キノコ詳細情報の状態変数
+  String? _selectedMushroomHabitat;
+  String? _selectedMushroomGrowthPattern;
+
   final List<String> _categories = [
     'カテゴリを選択してください',
     '植物',
+    'キノコ',
     '動物',
     '昆虫',
     '鉱物',
@@ -65,12 +73,32 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
     'その他',
   ];
 
+  // キノコ専用の選択肢
+  final List<String> _mushroomHabitatOptions = [
+    '選択してください',
+    '地面（土）',
+    '木（生木）',
+    '枯木',
+    '落ち葉',
+    '草地',
+    '苔むした場所',
+    'その他',
+  ];
+
+  final List<String> _mushroomGrowthPatternOptions = [
+    '選択してください',
+    '単生（1本のみ）',
+    '群生（数本がまとまって生える）',
+    '束生（根元から多数まとまる）',
+  ];
+
   @override
   void initState() {
     super.initState();
     _latitude = widget.initialLatitude;
     _longitude = widget.initialLongitude;
     _selectedMapId = widget.mapId; // 渡された地図IDを設定
+    _layer = widget.layer; // 現在のレイヤーを設定
     _discoveryTime = DateTime.now(); // デフォルトで現在時刻を設定
     _selectedCategory = _categories[0]; // デフォルトで最初のカテゴリを選択
     _loadMaps();
@@ -277,9 +305,12 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
       // 同じ地図の既存のメモを取得して次のピン番号を決定
       final existingMemos =
           await DatabaseHelper.instance.readMemosByMapId(_selectedMapId);
+      final layerMemos = existingMemos
+          .where((memo) => (memo.layer ?? 0) == (_layer ?? 0))
+          .toList();
       int nextPinNumber = 1;
-      if (existingMemos.isNotEmpty) {
-        final maxPinNumber = existingMemos
+      if (layerMemos.isNotEmpty) {
+        final maxPinNumber = layerMemos
             .where((memo) => memo.pinNumber != null)
             .map((memo) => memo.pinNumber!)
             .fold(0, (max, number) => number > max ? number : max);
@@ -305,8 +336,16 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
             : _notesController.text.trim(),
         pinNumber: nextPinNumber, // 自動的に次の番号を割り当て
         mapId: _selectedMapId, // 選択された地図ID
+        layer: _layer, // レイヤー番号
         audioPath: _audioPath, // 音声ファイルのパス
         imagePaths: _imagePaths.isNotEmpty ? _imagePaths : null, // 画像パス配列
+        // キノコ詳細情報（「選択してください」は保存しない）
+        mushroomHabitat: _selectedMushroomHabitat == '選択してください'
+            ? null
+            : _selectedMushroomHabitat,
+        mushroomGrowthPattern: _selectedMushroomGrowthPattern == '選択してください'
+            ? null
+            : _selectedMushroomGrowthPattern,
       );
 
       await DatabaseHelper.instance.create(memo);
@@ -334,6 +373,25 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
   String _formatDateTime(DateTime? dateTime) {
     if (dateTime == null) return '未設定';
     return '${dateTime.year}/${dateTime.month.toString().padLeft(2, '0')}/${dateTime.day.toString().padLeft(2, '0')} ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _getMushroomDetailsSummary() {
+    final details = <String>[];
+
+    if (_selectedMushroomHabitat != null &&
+        _selectedMushroomHabitat != '選択してください') {
+      details.add('発生場所: ${_selectedMushroomHabitat}');
+    }
+    if (_selectedMushroomGrowthPattern != null &&
+        _selectedMushroomGrowthPattern != '選択してください') {
+      details.add('生育状態: ${_selectedMushroomGrowthPattern}');
+    }
+
+    if (details.isEmpty) {
+      return '';
+    }
+
+    return '\n• キノコ詳細: ${details.join(', ')}${details.length < 2 ? ' など' : ''}';
   }
 
   /// Web環境でHTTPS接続かどうかを確認
@@ -365,7 +423,8 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
     // 部分一致をチェック（キーワードベース）
     final categoryMap = {
-      '植物': ['植物', '草', '木', '花', '葉', '樹', '草本', '木本', '藻類', '菌類', 'しょくぶつ'],
+      '植物': ['植物', '草', '木', '花', '葉', '樹', '草本', '木本', '藻類', 'しょくぶつ'],
+      'キノコ': ['キノコ', 'きのこ', '茸', '菌類', 'マッシュルーム', '菌', 'カビ', '真菌', 'きんるい'],
       '動物': ['動物', '哺乳類', '鳥', '魚', '両生類', '爬虫類', 'どうぶつ'],
       '昆虫': [
         '昆虫',
@@ -458,7 +517,19 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
         if (AIService.isConfigured) {
           try {
-            final analysis = await AIService.analyzeImage(_selectedImage!);
+            Map<String, String?> analysis;
+
+            // Web環境では XFile から直接バイト配列を取得して分析
+            if (kIsWeb) {
+              print('AddMemo Debug: Web環境で XFile から直接バイト配列を取得');
+              final imageBytes = await image.readAsBytes();
+              print('AddMemo Debug: 画像バイト配列サイズ: ${imageBytes.length}');
+              analysis = await AIService.analyzeImageBytes(imageBytes);
+            } else {
+              // ネイティブ環境では従来通り File を使用
+              print('AddMemo Debug: ネイティブ環境で File を使用');
+              analysis = await AIService.analyzeImage(_selectedImage!);
+            }
 
             List<String> updatedFields = [];
 
@@ -508,6 +579,11 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
             );
           } catch (aiError) {
             // AI分析エラーの詳細な処理
+            print('AddMemo Debug: AI分析エラー詳細:');
+            print('AddMemo Debug: エラータイプ: ${aiError.runtimeType}');
+            print('AddMemo Debug: エラーメッセージ: $aiError');
+            print('AddMemo Debug: エラートレース: ${StackTrace.current}');
+
             String errorMessage = '画像分析中にエラーが発生しました。';
 
             if (aiError.toString().contains('503') ||
@@ -523,9 +599,45 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text(errorMessage),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(errorMessage),
+                    if (kIsWeb) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'デバッグ情報:',
+                              style: TextStyle(
+                                  fontSize: 12, fontWeight: FontWeight.bold),
+                            ),
+                            Text('• エラータイプ: ${aiError.runtimeType}',
+                                style: const TextStyle(fontSize: 10)),
+                            Text('• Web環境: ${kIsWeb}',
+                                style: const TextStyle(fontSize: 10)),
+                            Text('• APIキー設定: ${AIService.isConfigured}',
+                                style: const TextStyle(fontSize: 10)),
+                            if (kIsWeb) ...[
+                              Text('• HTTPS接続: ${Uri.base.scheme == 'https'}',
+                                  style: const TextStyle(fontSize: 10)),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
                 backgroundColor: Colors.orange,
-                duration: const Duration(seconds: 5),
+                duration: const Duration(seconds: 8),
               ),
             );
           }
@@ -708,6 +820,11 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         );
       }
     } catch (e) {
+      print('AddMemo Debug: 音声文字起こしエラー詳細:');
+      print('AddMemo Debug: エラータイプ: ${e.runtimeType}');
+      print('AddMemo Debug: エラーメッセージ: $e');
+      print('AddMemo Debug: エラートレース: ${StackTrace.current}');
+
       String errorMessage = '音声文字起こしでエラーが発生しました。';
 
       if (e.toString().contains('503') ||
@@ -724,9 +841,45 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(errorMessage),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(errorMessage),
+              if (kIsWeb) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'デバッグ情報:',
+                        style: TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                      Text('• エラータイプ: ${e.runtimeType}',
+                          style: const TextStyle(fontSize: 10)),
+                      Text('• Web環境: ${kIsWeb}',
+                          style: const TextStyle(fontSize: 10)),
+                      Text('• APIキー設定: ${AIService.isConfigured}',
+                          style: const TextStyle(fontSize: 10)),
+                      if (kIsWeb) ...[
+                        Text('• HTTPS接続: ${Uri.base.scheme == 'https'}',
+                            style: const TextStyle(fontSize: 10)),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
           backgroundColor: Colors.red,
-          duration: const Duration(seconds: 5),
+          duration: const Duration(seconds: 8),
         ),
       );
     } finally {
@@ -914,10 +1067,30 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         ),
       );
     } catch (e) {
+      print('AddMemo Debug: テキスト改善エラー詳細:');
+      print('AddMemo Debug: エラータイプ: ${e.runtimeType}');
+      print('AddMemo Debug: エラーメッセージ: $e');
+      print('AddMemo Debug: エラートレース: ${StackTrace.current}');
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('改善提案の生成に失敗しました: $e'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('改善提案の生成に失敗しました'),
+              if (kIsWeb) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'デバッグ: ${e.runtimeType}',
+                  style: const TextStyle(fontSize: 10, color: Colors.white70),
+                ),
+              ],
+            ],
+          ),
           backgroundColor: Colors.red,
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
         ),
       );
     } finally {
@@ -978,10 +1151,31 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                     ),
                   );
                 } catch (e) {
+                  print('AddMemo Debug: 質問応答エラー詳細:');
+                  print('AddMemo Debug: エラータイプ: ${e.runtimeType}');
+                  print('AddMemo Debug: エラーメッセージ: $e');
+                  print('AddMemo Debug: エラートレース: ${StackTrace.current}');
+
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('回答の生成に失敗しました: $e'),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('回答の生成に失敗しました'),
+                          if (kIsWeb) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'デバッグ: ${e.runtimeType}',
+                              style: const TextStyle(
+                                  fontSize: 10, color: Colors.white70),
+                            ),
+                          ],
+                        ],
+                      ),
                       backgroundColor: Colors.red,
+                      duration: const Duration(seconds: 4),
+                      behavior: SnackBarBehavior.floating,
                     ),
                   );
                 } finally {
@@ -1095,10 +1289,88 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
               onChanged: (value) {
                 setState(() {
                   _selectedCategory = value;
+                  // カテゴリが変更された場合、キノコの詳細情報をリセット
+                  if (value != 'キノコ') {
+                    _selectedMushroomHabitat = null;
+                    _selectedMushroomGrowthPattern = null;
+                  }
                 });
               },
             ),
             const SizedBox(height: 16),
+
+            // キノコが選択された場合の詳細フィールド
+            if (_selectedCategory == 'キノコ') ...[
+              Card(
+                color: Colors.orange.shade50,
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.eco, color: Colors.orange.shade700),
+                          const SizedBox(width: 8),
+                          Text(
+                            'キノコの詳細情報',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                              color: Colors.orange.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+
+                      // 発生場所
+                      DropdownButtonFormField<String>(
+                        value: _selectedMushroomHabitat,
+                        decoration: const InputDecoration(
+                          labelText: '発生場所',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _mushroomHabitatOptions.map((habitat) {
+                          return DropdownMenuItem(
+                            value: habitat,
+                            child: Text(habitat),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedMushroomHabitat = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+
+                      // 生育状態
+                      DropdownButtonFormField<String>(
+                        value: _selectedMushroomGrowthPattern,
+                        decoration: const InputDecoration(
+                          labelText: '生育状態',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _mushroomGrowthPatternOptions.map((pattern) {
+                          return DropdownMenuItem(
+                            value: pattern,
+                            child: Text(pattern),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedMushroomGrowthPattern = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
 
             // 発見時間
             InkWell(
@@ -1837,12 +2109,12 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                   const SizedBox(height: 8),
                   Text(
                     '• タイトル: ${_titleController.text.trim().isEmpty ? "未入力" : _titleController.text.trim()}\n'
-                    '• カテゴリ: ${_selectedCategory ?? "未選択"}\n'
+                    '• カテゴリ: ${_selectedCategory ?? "未選択"}${_selectedCategory == 'キノコ' ? " (詳細情報入力済み)" : ""}\n'
                     '• 発見日時: ${_formatDateTime(_discoveryTime)}\n'
                     '• 発見者: ${_discovererController.text.trim().isEmpty ? "未入力" : _discovererController.text.trim()}\n'
                     '• 位置情報: ${_latitude != null && _longitude != null ? "設定済み" : "未設定"}\n'
                     '• 添付画像: ${_imagePaths.length}枚\n'
-                    '• 音声メモ: ${_audioPath != null ? "録音済み (文字起こし可能)" : "なし"}',
+                    '• 音声メモ: ${_audioPath != null ? "録音済み (文字起こし可能)" : "なし"}${_selectedCategory == 'キノコ' ? _getMushroomDetailsSummary() : ""}',
                     style: TextStyle(
                       fontSize: 12,
                       color: Colors.grey.shade700,

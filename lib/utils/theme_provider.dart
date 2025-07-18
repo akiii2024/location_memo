@@ -80,6 +80,14 @@ class ThemeProvider with ChangeNotifier {
           borderRadius: BorderRadius.circular(8),
         ),
       ),
+      // ライトモード時のタブバー設定を追加
+      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+        backgroundColor: Colors.white,
+        selectedItemColor: Colors.blue,
+        unselectedItemColor: Colors.grey,
+        type: BottomNavigationBarType.fixed,
+        elevation: 8,
+      ),
     );
   }
 
@@ -102,6 +110,14 @@ class ThemeProvider with ChangeNotifier {
       ),
       scaffoldBackgroundColor: const Color(0xFF121212),
       cardColor: const Color(0xFF1E1E1E),
+      // ダークモード時のタブバー設定を追加
+      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+        backgroundColor: Color(0xFF1E1E1E),
+        selectedItemColor: Colors.blue,
+        unselectedItemColor: Colors.grey,
+        type: BottomNavigationBarType.fixed,
+        elevation: 8,
+      ),
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'map_list_screen.dart';
 import 'tutorial_screen.dart';
+import 'about_app_screen.dart';
 import '../utils/theme_provider.dart';
 import '../utils/app_info.dart';
 import '../utils/ai_service.dart';
@@ -10,6 +11,7 @@ import '../utils/backup_service.dart';
 import '../utils/database_helper.dart';
 import '../utils/default_values.dart';
 import '../models/map_info.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -329,20 +331,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.blue.shade900.withOpacity(0.3)
+                        : Colors.blue.shade50,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.blue.shade200),
+                    border: Border.all(
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.blue.shade700
+                          : Colors.blue.shade200,
+                    ),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         '現在のデータ:',
-                        style: TextStyle(fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).textTheme.bodyLarge?.color,
+                        ),
                       ),
                       const SizedBox(height: 8),
-                      Text('地図: ${_backupInfo!.totalMaps}件'),
-                      Text('メモ: ${_backupInfo!.totalMemos}件'),
+                      Text(
+                        '地図: ${_backupInfo!.totalMaps}件',
+                        style: TextStyle(
+                          color: Theme.of(context).textTheme.bodyMedium?.color,
+                        ),
+                      ),
+                      Text(
+                        'メモ: ${_backupInfo!.totalMemos}件',
+                        style: TextStyle(
+                          color: Theme.of(context).textTheme.bodyMedium?.color,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -352,27 +373,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.green.shade50,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.green.shade900.withOpacity(0.3)
+                      : Colors.green.shade50,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.shade200),
+                  border: Border.all(
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.green.shade700
+                        : Colors.green.shade200,
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(
+                    Row(
                       children: [
                         Icon(Icons.backup, color: Colors.green, size: 20),
-                        SizedBox(width: 8),
+                        const SizedBox(width: 8),
                         Text(
                           '全体バックアップ',
-                          style: TextStyle(fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Theme.of(context).textTheme.bodyLarge?.color,
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
-                    const Text(
+                    Text(
                       '全てのメモと地図データ（画像を含む）をJSONファイルとして保存します。',
-                      style: TextStyle(fontSize: 14),
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Theme.of(context).textTheme.bodyMedium?.color,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     SizedBox(
@@ -402,27 +435,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.blue.shade900.withOpacity(0.3)
+                      : Colors.blue.shade50,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue.shade200),
+                  border: Border.all(
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.blue.shade700
+                        : Colors.blue.shade200,
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(
+                    Row(
                       children: [
                         Icon(Icons.map, color: Colors.blue, size: 20),
-                        SizedBox(width: 8),
+                        const SizedBox(width: 8),
                         Text(
                           '地図ごとのバックアップ',
-                          style: TextStyle(fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Theme.of(context).textTheme.bodyLarge?.color,
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
-                    const Text(
+                    Text(
                       '特定の地図とそのメモのみをバックアップします。',
-                      style: TextStyle(fontSize: 14),
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Theme.of(context).textTheme.bodyMedium?.color,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     SizedBox(
@@ -447,27 +492,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.orange.shade50,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.orange.shade900.withOpacity(0.3)
+                      : Colors.orange.shade50,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange.shade200),
+                  border: Border.all(
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.orange.shade700
+                        : Colors.orange.shade200,
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(
+                    Row(
                       children: [
                         Icon(Icons.restore, color: Colors.orange, size: 20),
-                        SizedBox(width: 8),
+                        const SizedBox(width: 8),
                         Text(
                           '復元',
-                          style: TextStyle(fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Theme.of(context).textTheme.bodyLarge?.color,
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
-                    const Text(
+                    Text(
                       'バックアップファイルからデータを復元します。',
-                      style: TextStyle(fontSize: 14),
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Theme.of(context).textTheme.bodyMedium?.color,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     SizedBox(
@@ -543,25 +600,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.grey.shade100,
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.grey.shade800
+                    : Colors.grey.shade100,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey.shade300),
+                border: Border.all(
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.grey.shade600
+                      : Colors.grey.shade300,
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'APIキーの取得方法:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).textTheme.bodyLarge?.color,
+                    ),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
+                  Text(
                     '1. aistudio.google.com にアクセス\n'
                     '2. Googleアカウントでログイン\n'
                     '3. "Get API key"をクリック\n'
                     '4. 新しいAPIキーを作成\n'
                     '5. コピーしたキーをコードに設定',
-                    style: TextStyle(fontSize: 12),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).textTheme.bodyMedium?.color,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -589,9 +658,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 16),
                   if (AIService.isConfigured) ...[
-                    const Text(
+                    Text(
                       '接続テスト:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).textTheme.bodyLarge?.color,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     SizedBox(
@@ -637,21 +709,96 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     try {
+      print('Settings Debug: API接続テスト開始');
       final isConnected = await AIService.testApiConnection();
+      print('Settings Debug: API接続テスト結果: $isConnected');
 
       if (mounted) {
         showDialog(
           context: context,
           builder: (context) => AlertDialog(
             title: Text(isConnected ? '✅ 接続成功' : '❌ 接続失敗'),
-            content: Text(isConnected
-                ? 'AIサービスに正常に接続できました。画像分析機能が利用可能です。'
-                : 'AIサービスへの接続に失敗しました。\n\n'
-                    '考えられる原因:\n'
-                    '• APIキーが無効または期限切れ\n'
-                    '• ネットワーク接続の問題\n'
-                    '• サーバーが一時的に利用不可\n\n'
-                    'しばらく時間をおいてから再試行してください。'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(isConnected
+                    ? 'AIサービスに正常に接続できました。画像分析機能が利用可能です。'
+                    : 'AIサービスへの接続に失敗しました。\n\n'
+                        '考えられる原因:\n'
+                        '• APIキーが無効または期限切れ\n'
+                        '• ネットワーク接続の問題\n'
+                        '• サーバーが一時的に利用不可\n\n'
+                        'しばらく時間をおいてから再試行してください。'),
+                if (!isConnected) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.orange.shade900.withOpacity(0.3)
+                          : Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Colors.orange.shade700
+                            : Colors.orange.shade200,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'デバッグ情報:',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Theme.of(context).textTheme.bodyLarge?.color,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '• プラットフォーム: ${Theme.of(context).platform}',
+                          style: TextStyle(
+                            color:
+                                Theme.of(context).textTheme.bodyMedium?.color,
+                          ),
+                        ),
+                        Text(
+                          '• Web環境: ${kIsWeb}',
+                          style: TextStyle(
+                            color:
+                                Theme.of(context).textTheme.bodyMedium?.color,
+                          ),
+                        ),
+                        Text(
+                          '• APIキー設定: ${AIService.isConfigured}',
+                          style: TextStyle(
+                            color:
+                                Theme.of(context).textTheme.bodyMedium?.color,
+                          ),
+                        ),
+                        if (kIsWeb) ...[
+                          Text(
+                            '• 現在のURL: ${Uri.base}',
+                            style: TextStyle(
+                              color:
+                                  Theme.of(context).textTheme.bodyMedium?.color,
+                            ),
+                          ),
+                          Text(
+                            '• HTTPS接続: ${Uri.base.scheme == 'https'}',
+                            style: TextStyle(
+                              color:
+                                  Theme.of(context).textTheme.bodyMedium?.color,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
@@ -662,13 +809,88 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     } catch (e) {
+      print('Settings Debug: API接続テストエラー: $e');
       if (mounted) {
         showDialog(
           context: context,
           builder: (context) => AlertDialog(
             title: const Text('❌ 接続エラー'),
-            content: Text('API接続テスト中にエラーが発生しました:\n\n$e\n\n'
-                'APIキーの設定とネットワーク接続を確認してください。'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('API接続テスト中にエラーが発生しました:\n\n$e\n\n'
+                    'APIキーの設定とネットワーク接続を確認してください。'),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.red.shade900.withOpacity(0.3)
+                        : Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.red.shade700
+                          : Colors.red.shade200,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'エラー詳細:',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).textTheme.bodyLarge?.color,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '• エラータイプ: ${e.runtimeType}',
+                        style: TextStyle(
+                          color: Theme.of(context).textTheme.bodyMedium?.color,
+                        ),
+                      ),
+                      Text(
+                        '• プラットフォーム: ${Theme.of(context).platform}',
+                        style: TextStyle(
+                          color: Theme.of(context).textTheme.bodyMedium?.color,
+                        ),
+                      ),
+                      Text(
+                        '• Web環境: ${kIsWeb}',
+                        style: TextStyle(
+                          color: Theme.of(context).textTheme.bodyMedium?.color,
+                        ),
+                      ),
+                      Text(
+                        '• APIキー設定: ${AIService.isConfigured}',
+                        style: TextStyle(
+                          color: Theme.of(context).textTheme.bodyMedium?.color,
+                        ),
+                      ),
+                      if (kIsWeb) ...[
+                        Text(
+                          '• 現在のURL: ${Uri.base}',
+                          style: TextStyle(
+                            color:
+                                Theme.of(context).textTheme.bodyMedium?.color,
+                          ),
+                        ),
+                        Text(
+                          '• HTTPS接続: ${Uri.base.scheme == 'https'}',
+                          style: TextStyle(
+                            color:
+                                Theme.of(context).textTheme.bodyMedium?.color,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
@@ -705,24 +927,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.blue.shade50,
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.blue.shade900.withOpacity(0.3)
+                    : Colors.blue.shade50,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue.shade200),
+                border: Border.all(
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.blue.shade700
+                      : Colors.blue.shade200,
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'お問い合わせ内容例:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).textTheme.bodyLarge?.color,
+                    ),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
+                  Text(
                     '• アプリの使い方について\n'
                     '• 新機能のご要望\n'
                     '• バグの報告\n'
                     '• その他のご質問',
-                    style: TextStyle(fontSize: 12),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).textTheme.bodyMedium?.color,
+                    ),
                   ),
                 ],
               ),
@@ -731,22 +965,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.green.shade50,
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.green.shade900.withOpacity(0.3)
+                    : Colors.green.shade50,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.green.shade200),
+                border: Border.all(
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.green.shade700
+                      : Colors.green.shade200,
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'お問い合わせ方法:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).textTheme.bodyLarge?.color,
+                    ),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
+                  Text(
                     'メールアプリが起動し、開発者宛のメールが作成されます。'
                     'お問い合わせ内容を記入して送信してください。',
-                    style: TextStyle(fontSize: 12),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).textTheme.bodyMedium?.color,
+                    ),
                   ),
                 ],
               ),
@@ -775,7 +1021,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _sendContactEmail() async {
     final Uri emailUri = Uri(
       scheme: 'mailto',
-      path: 'a601023053@st.tachibana-u.ac.jp',
+      path: 'example@example.com',
       query: _encodeQueryParameters({
         'subject': '[Location Memo] お問い合わせ',
         'body': '''お問い合わせ内容を記入してください。
@@ -849,7 +1095,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: ListTile(
                   leading: Icon(Icons.dark_mode, color: Colors.indigo.shade600),
                   title: const Text('ダークモード'),
-                  subtitle: const Text('ダークテーマを有効/無効にします（Beta）'),
+                  subtitle: const Text('ダークテーマを有効/無効にします'),
                   trailing: Switch(
                     value: themeProvider.isDarkMode,
                     onChanged: (value) {
@@ -958,22 +1204,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             elevation: 2,
             child: ListTile(
               leading: Icon(Icons.info, color: Colors.grey.shade600),
-              title: const Text('バージョン情報'),
-              subtitle: const Text('アプリのバージョン情報を表示'),
+              title: const Text('このアプリについて'),
+              subtitle: Text('${AppInfo.version}'),
               trailing: const Icon(Icons.arrow_forward_ios, size: 16),
               onTap: () {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('バージョン情報'),
-                    content: Text(
-                        '${AppInfo.appName}\n${AppInfo.version}\nDeveloped by Akihisa Iwata'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('OK'),
-                      ),
-                    ],
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const AboutAppScreen(),
                   ),
                 );
               },
@@ -1247,24 +1485,37 @@ class _DefaultValuesDialogState extends State<DefaultValuesDialog> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.blue.shade900.withOpacity(0.3)
+                          : Colors.blue.shade50,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.blue.shade200),
+                      border: Border.all(
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Colors.blue.shade700
+                            : Colors.blue.shade200,
+                      ),
                     ),
-                    child: const Column(
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           '設定内容:',
-                          style: TextStyle(fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Theme.of(context).textTheme.bodyLarge?.color,
+                          ),
                         ),
-                        SizedBox(height: 8),
+                        const SizedBox(height: 8),
                         Text(
                           '• 発見者: 新しいメモの「発見者」フィールドに自動入力\n'
                           '• 標本番号プレフィックス: 標本番号の先頭に自動付加\n'
                           '• カテゴリ: 新しいメモのカテゴリを自動選択\n'
                           '• 備考: 新しいメモの「備考」フィールドに自動入力',
-                          style: TextStyle(fontSize: 12),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color:
+                                Theme.of(context).textTheme.bodyMedium?.color,
+                          ),
                         ),
                       ],
                     ),

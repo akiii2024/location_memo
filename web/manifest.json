@@ -3,21 +3,30 @@
     "short_name": "Location Memo",
     "start_url": ".",
     "display": "standalone",
+    "display_override": ["standalone", "minimal-ui", "browser"],
     "background_color": "#ffffff",
     "theme_color": "#2196f3",
     "description": "位置情報付きメモアプリ - 場所とメモを簡単に記録・管理",
-    "orientation": "portrait-primary",
     "prefer_related_applications": false,
+    "edge_side_panel": {},
+    "launch_handler": {
+        "client_mode": "navigate-existing"
+    },
+    "orientation": "portrait-primary",
+    "categories": ["productivity", "navigation", "utilities"],
+    "scope": "/",
     "icons": [
         {
             "src": "icons/Icon-192.png",
             "sizes": "192x192",
-            "type": "image/png"
+            "type": "image/png",
+            "purpose": "any"
         },
         {
             "src": "icons/Icon-512.png",
             "sizes": "512x512",
-            "type": "image/png"
+            "type": "image/png",
+            "purpose": "any"
         },
         {
             "src": "icons/Icon-maskable-192.png",

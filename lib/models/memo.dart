@@ -34,6 +34,38 @@ class Memo {
   String? audioPath; // 音声ファイルのパス
   @HiveField(13)
   List<String>? imagePaths; // 画像パス配列を追加
+  @HiveField(28)
+  int? layer; // レイヤー番号を追加
+
+  // キノコ詳細情報フィールド
+  @HiveField(14)
+  String? mushroomCapShape; // 傘の形
+  @HiveField(15)
+  String? mushroomCapColor; // 傘の色
+  @HiveField(16)
+  String? mushroomCapSurface; // 傘の表面
+  @HiveField(17)
+  String? mushroomCapSize; // 傘の大きさ
+  @HiveField(18)
+  String? mushroomCapUnderStructure; // 傘裏面の構造
+  @HiveField(19)
+  String? mushroomGillFeature; // ヒダの特徴
+  @HiveField(20)
+  String? mushroomStemPresence; // 柄の有無
+  @HiveField(21)
+  String? mushroomStemShape; // 柄の形
+  @HiveField(22)
+  String? mushroomStemColor; // 柄の色
+  @HiveField(23)
+  String? mushroomStemSurface; // 柄表面の状態
+  @HiveField(24)
+  String? mushroomRingPresence; // つばの有無
+  @HiveField(25)
+  String? mushroomVolvaPresence; // つぼの有無
+  @HiveField(26)
+  String? mushroomHabitat; // 発生場所
+  @HiveField(27)
+  String? mushroomGrowthPattern; // 生育状態
 
   Memo({
     this.id,
@@ -51,6 +83,22 @@ class Memo {
     this.mapTitle, // 地図の名前
     this.audioPath, // 音声ファイルのパス
     this.imagePaths, // 画像パス配列を追加
+    // キノコ詳細情報
+    this.mushroomCapShape,
+    this.mushroomCapColor,
+    this.mushroomCapSurface,
+    this.mushroomCapSize,
+    this.mushroomCapUnderStructure,
+    this.mushroomGillFeature,
+    this.mushroomStemPresence,
+    this.mushroomStemShape,
+    this.mushroomStemColor,
+    this.mushroomStemSurface,
+    this.mushroomRingPresence,
+    this.mushroomVolvaPresence,
+    this.mushroomHabitat,
+    this.mushroomGrowthPattern,
+    this.layer, // レイヤー番号
   });
 
   Map<String, dynamic> toMap() {
@@ -70,6 +118,22 @@ class Memo {
       'audioPath': audioPath, // 音声ファイルのパス
       'imagePaths':
           imagePaths != null ? jsonEncode(imagePaths) : null, // JSON文字列として保存
+      // キノコ詳細情報
+      'mushroomCapShape': mushroomCapShape,
+      'mushroomCapColor': mushroomCapColor,
+      'mushroomCapSurface': mushroomCapSurface,
+      'mushroomCapSize': mushroomCapSize,
+      'mushroomCapUnderStructure': mushroomCapUnderStructure,
+      'mushroomGillFeature': mushroomGillFeature,
+      'mushroomStemPresence': mushroomStemPresence,
+      'mushroomStemShape': mushroomStemShape,
+      'mushroomStemColor': mushroomStemColor,
+      'mushroomStemSurface': mushroomStemSurface,
+      'mushroomRingPresence': mushroomRingPresence,
+      'mushroomVolvaPresence': mushroomVolvaPresence,
+      'mushroomHabitat': mushroomHabitat,
+      'mushroomGrowthPattern': mushroomGrowthPattern,
+      if (layer != null) 'layer': layer, // レイヤー番号を保存（存在する場合）
     };
   }
 
@@ -94,6 +158,22 @@ class Memo {
       imagePaths: map['imagePaths'] != null
           ? List<String>.from(jsonDecode(map['imagePaths']))
           : null, // JSON文字列からList<String>に変換
+      // キノコ詳細情報
+      mushroomCapShape: map['mushroomCapShape'],
+      mushroomCapColor: map['mushroomCapColor'],
+      mushroomCapSurface: map['mushroomCapSurface'],
+      mushroomCapSize: map['mushroomCapSize'],
+      mushroomCapUnderStructure: map['mushroomCapUnderStructure'],
+      mushroomGillFeature: map['mushroomGillFeature'],
+      mushroomStemPresence: map['mushroomStemPresence'],
+      mushroomStemShape: map['mushroomStemShape'],
+      mushroomStemColor: map['mushroomStemColor'],
+      mushroomStemSurface: map['mushroomStemSurface'],
+      mushroomRingPresence: map['mushroomRingPresence'],
+      mushroomVolvaPresence: map['mushroomVolvaPresence'],
+      mushroomHabitat: map['mushroomHabitat'],
+      mushroomGrowthPattern: map['mushroomGrowthPattern'],
+      layer: map['layer'], // レイヤー番号を読み込み
     );
   }
 }

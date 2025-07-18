@@ -5,7 +5,7 @@
     If you are serving your web app in a path other than the root, change the
     href value below to reflect the base path you are serving from.
 
-    The path provided below has to start and end with a slash "/" in order for
+    The path provided below has to start and end with a slash/ in order for
     it to work correctly.
 
     For more details:
@@ -17,26 +17,31 @@
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
-  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="位置情報付きメモアプリ - 場所とメモを簡単に記録・管理">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="位置情報付きメモアプリ">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
   <!-- PWA meta tags -->
-  <meta name="theme-color" content="#2196f3">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="Location Memo">
-  <meta name="msapplication-TileColor" content="#2196f3">
-  <meta name="msapplication-tap-highlight" content="no">
 
   <!-- iOS meta tags & icons -->
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
   <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png"/>
+  <link rel="icon" type="image/png" href="favicon.png">
 
   <title>Location Memo</title>
   <link rel="manifest" href="manifest.json">
+  <style>
+    /* View-Transition 自体を作らせない（既に追加済）*/
+    @view-transition { navigation: none; }
+
+    /* 万一残留した場合に備えてポインタも殺す */
+    html::view-transition-old(root),
+    html::view-transition-new(root){
+      pointer-events:none !important;
+    }
+  </style>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
