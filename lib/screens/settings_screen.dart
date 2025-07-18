@@ -1021,7 +1021,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _sendContactEmail() async {
     final Uri emailUri = Uri(
       scheme: 'mailto',
-      path: 'example@example.com',
+      path: 'a601023053@st.tachibana-u.ac.jp',
       query: _encodeQueryParameters({
         'subject': '[Location Memo] お問い合わせ',
         'body': '''お問い合わせ内容を記入してください。

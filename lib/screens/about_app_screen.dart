@@ -206,6 +206,15 @@ class AboutAppScreen extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
+            const Text(
+              'Concept by',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'NotoSansJP',
+              ),
+            ),
+            const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -242,11 +251,12 @@ class AboutAppScreen extends StatelessWidget {
                 ),
                 const SizedBox(width: 16),
                 // メールリンク
-                GestureDetector(
+                /*
+                rGestureDetector(
                   onTap: () async {
                     final Uri emailUri = Uri(
                       scheme: 'mailto',
-                      path: 'another-person@example.com',
+                      path: 'example@example.com',
                     );
 
                     try {
@@ -290,6 +300,7 @@ class AboutAppScreen extends StatelessWidget {
                     ),
                   ),
                 ),
+                */
               ],
             ),
 

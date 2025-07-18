@@ -1,13 +1,16 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import '../models/memo.dart';
 import '../models/map_info.dart';
 import 'database_helper.dart';
+
+// Web環境でのファイルダウンロード用
+import 'dart:html' as html if (dart.library.html) 'dart:html';
 
 class BackupService {
   static const String _backupFileName = 'location_memo_backup.json';
@@ -72,12 +75,16 @@ class BackupService {
       // JSONに変換
       final jsonString = jsonEncode(backupData);
 
-      // 一時ファイルに保存
-      final directory = await getTemporaryDirectory();
-      final file = File('${directory.path}/$_backupFileName');
-      await file.writeAsString(jsonString);
-
-      return file.path;
+      if (kIsWeb) {
+        // Web環境では一時ファイルの代わりにJSON文字列を返す
+        return jsonString;
+      } else {
+        // ネイティブ環境では一時ファイルに保存
+        final directory = await getTemporaryDirectory();
+        final file = File('${directory.path}/$_backupFileName');
+        await file.writeAsString(jsonString);
+        return file.path;
+      }
     } catch (e) {
       print('バックアップエクスポートエラー: $e');
       return null;
@@ -145,14 +152,18 @@ class BackupService {
       // JSONに変換
       final jsonString = jsonEncode(backupData);
 
-      // 一時ファイルに保存
-      final directory = await getTemporaryDirectory();
-      final fileName =
-          '${_mapBackupFilePrefix}_${targetMap.title.replaceAll(RegExp(r'[^\w\d]'), '_')}.json';
-      final file = File('${directory.path}/$fileName');
-      await file.writeAsString(jsonString);
-
-      return file.path;
+      if (kIsWeb) {
+        // Web環境では一時ファイルの代わりにJSON文字列を返す
+        return jsonString;
+      } else {
+        // ネイティブ環境では一時ファイルに保存
+        final directory = await getTemporaryDirectory();
+        final fileName =
+            '${_mapBackupFilePrefix}_${targetMap.title.replaceAll(RegExp(r'[^\w\d]'), '_')}.json';
+        final file = File('${directory.path}/$fileName');
+        await file.writeAsString(jsonString);
+        return file.path;
+      }
     } catch (e) {
       print('地図バックアップエクスポートエラー: $e');
       return null;
@@ -162,14 +173,22 @@ class BackupService {
   /// バックアップファイルを共有
   static Future<bool> shareBackupFile() async {
     try {
-      final filePath = await exportData();
-      if (filePath != null) {
-        await Share.shareXFiles(
-          [XFile(filePath)],
-          text: 'ロケーションメモのバックアップファイル',
-          subject: 'バックアップデータ',
-        );
-        return true;
+      final result = await exportData();
+      if (result != null) {
+        if (kIsWeb) {
+          // Web環境では直接ダウンロード
+          _downloadJsonInWeb(result, _backupFileName);
+          print('バックアップファイル「$_backupFileName」のダウンロードを開始しました');
+          return true;
+        } else {
+          // ネイティブ環境では従来通り共有
+          await Share.shareXFiles(
+            [XFile(result)],
+            text: 'ロケーションメモのバックアップファイル',
+            subject: 'バックアップデータ',
+          );
+          return true;
+        }
       }
       return false;
     } catch (e) {
@@ -181,17 +200,27 @@ class BackupService {
   /// 地図のバックアップファイルを共有
   static Future<bool> shareMapBackupFile(int mapId) async {
     try {
-      final filePath = await exportMapData(mapId);
-      if (filePath != null) {
+      final result = await exportMapData(mapId);
+      if (result != null) {
         final maps = await DatabaseHelper.instance.readAllMaps();
         final targetMap = maps.firstWhere((map) => map.id == mapId);
 
-        await Share.shareXFiles(
-          [XFile(filePath)],
-          text: '地図「${targetMap.title}」のバックアップファイル',
-          subject: '地図バックアップデータ',
-        );
-        return true;
+        if (kIsWeb) {
+          // Web環境では直接ダウンロード
+          final fileName =
+              '${_mapBackupFilePrefix}_${targetMap.title.replaceAll(RegExp(r'[^\w\d]'), '_')}.json';
+          _downloadJsonInWeb(result, fileName);
+          print('地図「${targetMap.title}」のバックアップファイル「$fileName」のダウンロードを開始しました');
+          return true;
+        } else {
+          // ネイティブ環境では従来通り共有
+          await Share.shareXFiles(
+            [XFile(result)],
+            text: '地図「${targetMap.title}」のバックアップファイル',
+            subject: '地図バックアップデータ',
+          );
+          return true;
+        }
       }
       return false;
     } catch (e) {
@@ -262,13 +291,25 @@ class BackupService {
 
   /// 画像ファイルをBase64エンコード
   static Future<String> _encodeImageToBase64(String imagePath) async {
-    final file = File(imagePath);
-    if (!await file.exists()) {
-      throw Exception('画像ファイルが見つかりません: $imagePath');
-    }
+    if (kIsWeb) {
+      // Web環境では画像パスが既にBase64データ形式の場合がある
+      if (imagePath.startsWith('data:image')) {
+        // Base64データURL形式の場合、Base64部分を抽出
+        final base64Data = imagePath.split(',')[1];
+        return base64Data;
+      } else {
+        throw Exception('Web環境で無効な画像パス形式です: $imagePath');
+      }
+    } else {
+      // ネイティブ環境では従来通りファイルから読み込み
+      final file = File(imagePath);
+      if (!await file.exists()) {
+        throw Exception('画像ファイルが見つかりません: $imagePath');
+      }
 
-    final bytes = await file.readAsBytes();
-    return base64Encode(bytes);
+      final bytes = await file.readAsBytes();
+      return base64Encode(bytes);
+    }
   }
 
   /// Base64データを画像ファイルとしてデコード
@@ -435,6 +476,22 @@ class BackupService {
             mapId: memo.mapId,
             audioPath: memo.audioPath,
             imagePaths: restoredImagePaths, // 復元された画像パスを設定
+            layer: memo.layer, // レイヤー情報を復元
+            // キノコ詳細情報も復元
+            mushroomCapShape: memo.mushroomCapShape,
+            mushroomCapColor: memo.mushroomCapColor,
+            mushroomCapSurface: memo.mushroomCapSurface,
+            mushroomCapSize: memo.mushroomCapSize,
+            mushroomCapUnderStructure: memo.mushroomCapUnderStructure,
+            mushroomGillFeature: memo.mushroomGillFeature,
+            mushroomStemPresence: memo.mushroomStemPresence,
+            mushroomStemShape: memo.mushroomStemShape,
+            mushroomStemColor: memo.mushroomStemColor,
+            mushroomStemSurface: memo.mushroomStemSurface,
+            mushroomRingPresence: memo.mushroomRingPresence,
+            mushroomVolvaPresence: memo.mushroomVolvaPresence,
+            mushroomHabitat: memo.mushroomHabitat,
+            mushroomGrowthPattern: memo.mushroomGrowthPattern,
           );
           await DatabaseHelper.instance.create(newMemo);
           memosImported++;
@@ -572,6 +629,22 @@ class BackupService {
             mapId: createdMap.id,
             audioPath: memo.audioPath,
             imagePaths: restoredImagePaths, // 復元された画像パスを設定
+            layer: memo.layer, // レイヤー情報を復元
+            // キノコ詳細情報も復元
+            mushroomCapShape: memo.mushroomCapShape,
+            mushroomCapColor: memo.mushroomCapColor,
+            mushroomCapSurface: memo.mushroomCapSurface,
+            mushroomCapSize: memo.mushroomCapSize,
+            mushroomCapUnderStructure: memo.mushroomCapUnderStructure,
+            mushroomGillFeature: memo.mushroomGillFeature,
+            mushroomStemPresence: memo.mushroomStemPresence,
+            mushroomStemShape: memo.mushroomStemShape,
+            mushroomStemColor: memo.mushroomStemColor,
+            mushroomStemSurface: memo.mushroomStemSurface,
+            mushroomRingPresence: memo.mushroomRingPresence,
+            mushroomVolvaPresence: memo.mushroomVolvaPresence,
+            mushroomHabitat: memo.mushroomHabitat,
+            mushroomGrowthPattern: memo.mushroomGrowthPattern,
           );
           await DatabaseHelper.instance.create(newMemo);
           memosImported++;
@@ -706,6 +779,88 @@ class BackupService {
     } catch (e) {
       print('地図バックアップ情報取得エラー: $e');
       return null;
+    }
+  }
+
+  /// Web環境でのJSONファイルダウンロード
+  static void _downloadJsonInWeb(String jsonContent, String fileName) {
+    if (kIsWeb) {
+      try {
+        // Web環境でのダウンロード機能
+        _triggerWebDownload(jsonContent, fileName);
+        print('Web環境でのバックアップファイルダウンロード完了: $fileName');
+      } catch (e) {
+        print('Web環境でのダウンロードエラー: $e');
+        // フォールバック: コンソールに内容を出力
+        print('バックアップデータ（ファイル名: $fileName）:');
+        print(jsonContent);
+        print('このデータをコピーして手動でファイルに保存してください。');
+      }
+    }
+  }
+
+  /// Web環境でのダウンロードトリガー（実際のファイルダウンロード）
+  static void _triggerWebDownload(String content, String fileName) {
+    if (kIsWeb) {
+      try {
+        // JSONコンテンツをUint8Listに変換
+        final bytes = utf8.encode(content);
+
+        // BlobオブジェクトとしてJSONファイルを作成
+        final blob = html.Blob([bytes], 'application/json');
+
+        // ダウンロード用のURLを生成
+        final url = html.Url.createObjectUrlFromBlob(blob);
+
+        // ダウンロードリンクを作成
+        final anchor = html.AnchorElement(href: url)
+          ..target = '_blank'
+          ..download = fileName;
+
+        // DOMに一時的に追加してクリック実行
+        html.document.body!.append(anchor);
+        anchor.click();
+        anchor.remove();
+
+        // メモリリークを防ぐためURLオブジェクトを解放
+        html.Url.revokeObjectUrl(url);
+
+        print('ファイル「$fileName」のダウンロードを開始しました');
+      } catch (e) {
+        print('ダウンロードエラー: $e');
+        // フォールバック: データURIを使用
+        _fallbackDataUriDownload(content, fileName);
+      }
+    }
+  }
+
+  /// フォールバック：データURIを使用したダウンロード
+  static void _fallbackDataUriDownload(String content, String fileName) {
+    if (kIsWeb) {
+      try {
+        // データURIとしてJSONを作成
+        final dataUri =
+            'data:application/json;charset=utf-8,${Uri.encodeComponent(content)}';
+
+        // ダウンロードリンクを作成
+        final anchor = html.AnchorElement(href: dataUri)
+          ..target = '_blank'
+          ..download = fileName;
+
+        // DOMに一時的に追加してクリック実行
+        html.document.body!.append(anchor);
+        anchor.click();
+        anchor.remove();
+
+        print('データURIを使用してファイル「$fileName」のダウンロードを開始しました');
+      } catch (e) {
+        print('フォールバックダウンロードもエラー: $e');
+        // 最終フォールバック: コンソール出力
+        print('=== バックアップファイル「$fileName」の内容 ===');
+        print('以下のJSONデータをコピーして手動で保存してください：');
+        print(content);
+        print('=== ここまで ===');
+      }
     }
   }
 }
