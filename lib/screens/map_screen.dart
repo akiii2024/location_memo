@@ -252,7 +252,10 @@ class _MapScreenState extends State<MapScreen> {
               try {
                 switch (value) {
                   case 'print_map':
-                    await PrintHelper.printMapImage(_customMapPath);
+                    await PrintHelper.printMapImage(
+                      _customMapPath,
+                      mapName: widget.mapInfo?.title ?? 'カスタム地図',
+                    );
                     break;
                   case 'print_map_with_pins':
                     final mapState = _mapWidgetKey.currentState;
@@ -264,6 +267,7 @@ class _MapScreenState extends State<MapScreen> {
                             .toList(),
                         mapState.actualDisplayWidth,
                         mapState.actualDisplayHeight,
+                        mapName: widget.mapInfo?.title ?? 'カスタム地図',
                       );
                     } else {
                       // フォールバック: デフォルトサイズを使用
@@ -274,20 +278,26 @@ class _MapScreenState extends State<MapScreen> {
                             .toList(),
                         800.0,
                         600.0,
+                        mapName: widget.mapInfo?.title ?? 'カスタム地図',
                       );
                     }
                     break;
                   case 'print_list':
-                    await PrintHelper.printMemoList(_memos
-                        .where((m) => (m.layer ?? 0) == _currentLayer)
-                        .toList());
+                    await PrintHelper.printMemoReport(
+                      _memos
+                          .where((m) => (m.layer ?? 0) == _currentLayer)
+                          .toList(),
+                      mapName: widget.mapInfo?.title ?? 'カスタム地図',
+                    );
                     break;
                   case 'save_pdf':
                     await PrintHelper.savePdfReport(
-                        _memos
-                            .where((m) => (m.layer ?? 0) == _currentLayer)
-                            .toList(),
-                        mapImagePath: _customMapPath);
+                      _memos
+                          .where((m) => (m.layer ?? 0) == _currentLayer)
+                          .toList(),
+                      mapImagePath: _customMapPath,
+                      mapName: widget.mapInfo?.title ?? 'カスタム地図',
+                    );
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('PDFファイルを保存しました')),
                     );

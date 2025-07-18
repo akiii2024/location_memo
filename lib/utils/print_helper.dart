@@ -12,7 +12,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:convert'; // Base64デコード用
 // Web環境での機能は動的に処理
-import 'web_print_helper_stub.dart' if (dart.library.html) 'web_print_helper.dart';
+import 'web_print_helper_stub.dart'
+    if (dart.library.html) 'web_print_helper.dart';
 
 import '../models/memo.dart';
 
@@ -320,11 +321,8 @@ class PrintHelper {
 
   // ピン付き地図を印刷する新しいメソッド
   static Future<void> printMapWithPins(
-    String? mapImagePath,
-    List<Memo> memos,
-    double mapWidth,
-    double mapHeight,
-  ) async {
+      String? mapImagePath, List<Memo> memos, double mapWidth, double mapHeight,
+      {String? mapName}) async {
     if (!_isValidImagePath(mapImagePath)) {
       throw Exception('地図画像が見つかりません');
     }
@@ -352,7 +350,9 @@ class PrintHelper {
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
               pw.Text(
-                'フィールドワーク地図（ピン付き）',
+                mapName != null && mapName.isNotEmpty
+                    ? mapName
+                    : 'フィールドワーク地図（ピン付き）',
                 style: _createTextStyle(boldFont, 18),
               ),
               pw.SizedBox(height: 20),
@@ -388,7 +388,8 @@ class PrintHelper {
         pdf, 'fieldwork_map_${DateTime.now().millisecondsSinceEpoch}.pdf');
   }
 
-  static Future<void> printMapImage(String? mapImagePath) async {
+  static Future<void> printMapImage(String? mapImagePath,
+      {String? mapName}) async {
     if (!_isValidImagePath(mapImagePath)) {
       throw Exception('地図画像が見つかりません');
     }
@@ -409,7 +410,7 @@ class PrintHelper {
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
               pw.Text(
-                'フィールドワーク地図',
+                mapName != null && mapName.isNotEmpty ? mapName : 'フィールドワーク地図',
                 style: _createTextStyle(boldFont, 18),
               ),
               pw.SizedBox(height: 20),
@@ -442,7 +443,7 @@ class PrintHelper {
   }
 
   static Future<void> printMemoReport(List<Memo> memos,
-      {String? mapImagePath}) async {
+      {String? mapImagePath, String? mapName}) async {
     final pdf = pw.Document();
 
     // 日本語フォントを取得
@@ -462,7 +463,9 @@ class PrintHelper {
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Text(
-                  'フィールドワーク記録地図',
+                  mapName != null && mapName.isNotEmpty
+                      ? mapName
+                      : 'フィールドワーク記録地図',
                   style: _createTextStyle(boldFont, 18),
                 ),
                 pw.SizedBox(height: 20),
@@ -612,14 +615,14 @@ class PrintHelper {
     await printMemoReport(memos);
   }
 
-  static Future<void> printMapWithMemos(
-      List<Memo> memos, String? mapImagePath) async {
+  static Future<void> printMapWithMemos(List<Memo> memos, String? mapImagePath,
+      {String? mapName}) async {
     // 地図画像のみを印刷
-    await printMapImage(mapImagePath);
+    await printMapImage(mapImagePath, mapName: mapName);
   }
 
   static Future<void> savePdfReport(List<Memo> memos,
-      {String? mapImagePath}) async {
+      {String? mapImagePath, String? mapName}) async {
     try {
       final pdf = pw.Document();
       // 日本語フォントを取得
@@ -639,7 +642,9 @@ class PrintHelper {
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
                   pw.Text(
-                    'フィールドワーク記録地図',
+                    mapName != null && mapName.isNotEmpty
+                        ? mapName
+                        : 'フィールドワーク記録地図',
                     style: _createTextStyle(boldFont, 18),
                   ),
                   pw.SizedBox(height: 20),
