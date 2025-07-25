@@ -1231,7 +1231,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.smart_toy, color: Colors.blue),
+                : const Icon(Icons.smart_toy),
             tooltip: 'AIアシスタント',
             onPressed: _isAnalyzing ? null : _showAIAssistant,
           ),
