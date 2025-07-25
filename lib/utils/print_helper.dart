@@ -499,6 +499,11 @@ class PrintHelper {
 
     // メモ一覧ページを追加
     if (memos.isNotEmpty) {
+      // 非同期でメモアイテムを構築
+      final memoWidgets = await Future.wait(
+        memos.map((memo) => _buildMemoItem(memo, font, boldFont)).toList(),
+      );
+
       pdf.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,
@@ -510,7 +515,7 @@ class PrintHelper {
                 style: _createTextStyle(boldFont, 18),
               ),
               pw.SizedBox(height: 20),
-              ...memos.map((memo) => _buildMemoItem(memo, font, boldFont)),
+              ...memoWidgets,
             ];
           },
         ),
@@ -522,7 +527,235 @@ class PrintHelper {
         pdf, 'fieldwork_report_${DateTime.now().millisecondsSinceEpoch}.pdf');
   }
 
-  static pw.Widget _buildMemoItem(Memo memo, pw.Font font, pw.Font boldFont) {
+  static Future<pw.Widget> _buildMemoItem(
+      Memo memo, pw.Font font, pw.Font boldFont) async {
+    List<pw.Widget> children = [
+      pw.Text(
+        memo.title,
+        style: _createTextStyle(boldFont, 14),
+      ),
+      pw.SizedBox(height: 5),
+
+      // 基本情報
+      pw.Row(
+        children: [
+          if (memo.category != null) ...[
+            pw.Text(
+              'カテゴリ: ${memo.category}',
+              style: _createTextStyle(font, 10),
+            ),
+            pw.SizedBox(width: 20),
+          ],
+          if (memo.discoveryTime != null) ...[
+            pw.Text(
+              '発見日時: ${_formatDateTime(memo.discoveryTime!)}',
+              style: _createTextStyle(font, 10),
+            ),
+          ],
+        ],
+      ),
+
+      if (memo.discoverer != null || memo.specimenNumber != null) ...[
+        pw.SizedBox(height: 3),
+        pw.Row(
+          children: [
+            if (memo.discoverer != null) ...[
+              pw.Text(
+                '発見者: ${memo.discoverer}',
+                style: _createTextStyle(font, 10),
+              ),
+              pw.SizedBox(width: 20),
+            ],
+            if (memo.specimenNumber != null) ...[
+              pw.Text(
+                '標本番号: ${memo.specimenNumber}',
+                style: _createTextStyle(font, 10),
+              ),
+            ],
+          ],
+        ),
+      ],
+
+      if (memo.content.isNotEmpty) ...[
+        pw.SizedBox(height: 8),
+        pw.Text(
+          '説明: ${memo.content}',
+          style: _createTextStyle(font, 11),
+        ),
+      ],
+
+      if (memo.notes != null && memo.notes!.isNotEmpty) ...[
+        pw.SizedBox(height: 5),
+        pw.Text(
+          '備考: ${memo.notes}',
+          style: _createTextStyle(font, 10, color: PdfColors.grey600),
+        ),
+      ],
+
+      if (memo.latitude != null && memo.longitude != null) ...[
+        pw.SizedBox(height: 5),
+        pw.Text(
+          '位置: (${memo.latitude!.toStringAsFixed(6)}, ${memo.longitude!.toStringAsFixed(6)})',
+          style: _createTextStyle(font, 9, color: PdfColors.grey600),
+        ),
+      ],
+    ];
+
+    // 添付画像がある場合は画像セクションを追加
+    if (memo.imagePaths != null && memo.imagePaths!.isNotEmpty) {
+      children.addAll([
+        pw.SizedBox(height: 8),
+        pw.Text(
+          '添付画像 (${memo.imagePaths!.length}枚):',
+          style: _createTextStyle(font, 10, color: PdfColors.grey600),
+        ),
+        pw.SizedBox(height: 5),
+      ]);
+
+      // 画像を2列で配置
+      for (int i = 0; i < memo.imagePaths!.length; i += 2) {
+        List<pw.Widget> rowChildren = [];
+        double rowHeight = 80.0; // デフォルトの最小高さ
+
+        // 1枚目の画像のサイズを計算
+        double height1 = 80.0;
+        Uint8List? imageBytes1;
+        try {
+          imageBytes1 = await _loadImageBytes(memo.imagePaths![i]);
+          final image1 = await decodeImageFromList(imageBytes1);
+          final aspectRatio1 = image1.width / image1.height;
+          // 列幅を約200pxと仮定してアスペクト比から高さを計算
+          final calculatedHeight1 = 200.0 / aspectRatio1;
+          height1 = calculatedHeight1.clamp(80.0, 150.0); // 最小80px、最大150px
+        } catch (e) {
+          height1 = 80.0; // エラー時はデフォルト高さ
+        }
+
+        // 2枚目の画像のサイズを計算（存在する場合）
+        double height2 = 80.0;
+        Uint8List? imageBytes2;
+        if (i + 1 < memo.imagePaths!.length) {
+          try {
+            imageBytes2 = await _loadImageBytes(memo.imagePaths![i + 1]);
+            final image2 = await decodeImageFromList(imageBytes2);
+            final aspectRatio2 = image2.width / image2.height;
+            final calculatedHeight2 = 200.0 / aspectRatio2;
+            height2 = calculatedHeight2.clamp(80.0, 150.0);
+          } catch (e) {
+            height2 = 80.0;
+          }
+        }
+
+        // 同一行の高さを揃える（高い方に合わせる）
+        rowHeight = height1 > height2 ? height1 : height2;
+
+        // 最初の画像
+        if (imageBytes1 != null) {
+          rowChildren.add(
+            pw.Expanded(
+              child: pw.Container(
+                height: rowHeight,
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.grey300),
+                  borderRadius: pw.BorderRadius.circular(4),
+                ),
+                child: pw.ClipRRect(
+                  horizontalRadius: 4,
+                  verticalRadius: 4,
+                  child: pw.Image(
+                    pw.MemoryImage(imageBytes1),
+                    fit: pw.BoxFit.contain, // coverからcontainに変更して画像全体を表示
+                  ),
+                ),
+              ),
+            ),
+          );
+        } else {
+          // 画像読み込みエラーの場合はプレースホルダーを表示
+          rowChildren.add(
+            pw.Expanded(
+              child: pw.Container(
+                height: rowHeight,
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.grey300),
+                  borderRadius: pw.BorderRadius.circular(4),
+                  color: PdfColors.grey100,
+                ),
+                child: pw.Center(
+                  child: pw.Text(
+                    '画像読み込み\nエラー',
+                    textAlign: pw.TextAlign.center,
+                    style: _createTextStyle(font, 8, color: PdfColors.grey600),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+
+        // 2枚目の画像（存在する場合）
+        if (i + 1 < memo.imagePaths!.length) {
+          rowChildren.add(pw.SizedBox(width: 10));
+          if (imageBytes2 != null) {
+            rowChildren.add(
+              pw.Expanded(
+                child: pw.Container(
+                  height: rowHeight,
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(color: PdfColors.grey300),
+                    borderRadius: pw.BorderRadius.circular(4),
+                  ),
+                  child: pw.ClipRRect(
+                    horizontalRadius: 4,
+                    verticalRadius: 4,
+                    child: pw.Image(
+                      pw.MemoryImage(imageBytes2),
+                      fit: pw.BoxFit.contain, // coverからcontainに変更
+                    ),
+                  ),
+                ),
+              ),
+            );
+          } else {
+            rowChildren.add(
+              pw.Expanded(
+                child: pw.Container(
+                  height: rowHeight,
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(color: PdfColors.grey300),
+                    borderRadius: pw.BorderRadius.circular(4),
+                    color: PdfColors.grey100,
+                  ),
+                  child: pw.Center(
+                    child: pw.Text(
+                      '画像読み込み\nエラー',
+                      textAlign: pw.TextAlign.center,
+                      style:
+                          _createTextStyle(font, 8, color: PdfColors.grey600),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }
+        } else {
+          // 奇数枚の場合は空のスペースを追加
+          rowChildren.add(pw.SizedBox(width: 10));
+          rowChildren.add(pw.Expanded(child: pw.Container()));
+        }
+
+        children.add(
+          pw.Row(
+            children: rowChildren,
+          ),
+        );
+
+        if (i + 2 < memo.imagePaths!.length) {
+          children.add(pw.SizedBox(height: 5));
+        }
+      }
+    }
+
     return pw.Container(
       margin: const pw.EdgeInsets.only(bottom: 15),
       padding: const pw.EdgeInsets.all(10),
@@ -532,77 +765,7 @@ class PrintHelper {
       ),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Text(
-            memo.title,
-            style: _createTextStyle(boldFont, 14),
-          ),
-          pw.SizedBox(height: 5),
-
-          // 基本情報
-          pw.Row(
-            children: [
-              if (memo.category != null) ...[
-                pw.Text(
-                  'カテゴリ: ${memo.category}',
-                  style: _createTextStyle(font, 10),
-                ),
-                pw.SizedBox(width: 20),
-              ],
-              if (memo.discoveryTime != null) ...[
-                pw.Text(
-                  '発見日時: ${_formatDateTime(memo.discoveryTime!)}',
-                  style: _createTextStyle(font, 10),
-                ),
-              ],
-            ],
-          ),
-
-          if (memo.discoverer != null || memo.specimenNumber != null) ...[
-            pw.SizedBox(height: 3),
-            pw.Row(
-              children: [
-                if (memo.discoverer != null) ...[
-                  pw.Text(
-                    '発見者: ${memo.discoverer}',
-                    style: _createTextStyle(font, 10),
-                  ),
-                  pw.SizedBox(width: 20),
-                ],
-                if (memo.specimenNumber != null) ...[
-                  pw.Text(
-                    '標本番号: ${memo.specimenNumber}',
-                    style: _createTextStyle(font, 10),
-                  ),
-                ],
-              ],
-            ),
-          ],
-
-          if (memo.content.isNotEmpty) ...[
-            pw.SizedBox(height: 8),
-            pw.Text(
-              '説明: ${memo.content}',
-              style: _createTextStyle(font, 11),
-            ),
-          ],
-
-          if (memo.notes != null && memo.notes!.isNotEmpty) ...[
-            pw.SizedBox(height: 5),
-            pw.Text(
-              '備考: ${memo.notes}',
-              style: _createTextStyle(font, 10, color: PdfColors.grey600),
-            ),
-          ],
-
-          if (memo.latitude != null && memo.longitude != null) ...[
-            pw.SizedBox(height: 5),
-            pw.Text(
-              '位置: (${memo.latitude!.toStringAsFixed(6)}, ${memo.longitude!.toStringAsFixed(6)})',
-              style: _createTextStyle(font, 9, color: PdfColors.grey600),
-            ),
-          ],
-        ],
+        children: children,
       ),
     );
   }
@@ -678,6 +841,11 @@ class PrintHelper {
 
       // メモ一覧ページを追加
       if (memos.isNotEmpty) {
+        // 非同期でメモアイテムを構築
+        final memoWidgets = await Future.wait(
+          memos.map((memo) => _buildMemoItem(memo, font, boldFont)).toList(),
+        );
+
         pdf.addPage(
           pw.MultiPage(
             pageFormat: PdfPageFormat.a4,
@@ -689,7 +857,7 @@ class PrintHelper {
                   style: _createTextStyle(boldFont, 18),
                 ),
                 pw.SizedBox(height: 20),
-                ...memos.map((memo) => _buildMemoItem(memo, font, boldFont)),
+                ...memoWidgets,
               ];
             },
           ),

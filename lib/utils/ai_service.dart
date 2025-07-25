@@ -7,6 +7,23 @@ import 'api_config.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
+/// AI機能サービス（ベータ版）
+///
+/// このクラスはGemini APIを使用したAI機能を提供します。
+/// 現在ベータ版として提供されており、機能やAPIの仕様が変更される可能性があります。
+///
+/// 主な機能：
+/// - 画像分析（自然観察記録の自動生成）
+/// - OCR（画像からの文字読み取り）
+/// - 音声文字起こし
+/// - テキスト改善提案
+/// - 質問応答
+/// - 複数地点記録の一括読み取り
+///
+/// 注意事項：
+/// - Web環境では一部機能が制限される場合があります
+/// - APIキーの設定が必要です
+/// - 使用量制限や課金設定の確認をお勧めします
 class AIService {
   static const String _apiKey = ApiConfig.geminiApiKey; // APIキーをここに設定
 
@@ -299,6 +316,339 @@ class AIService {
     }
   }
 
+  /// Web環境での画像から文字を読み取り（OCR機能・ベータ版）
+  ///
+  /// 画像に写っている文字を認識し、フィールドワーク記録として解析します。
+  /// ベータ版のため、認識精度や機能が変更される可能性があります。
+  ///
+  /// 注意事項：
+  /// - 手書き文字の認識精度は印刷文字より低い場合があります
+  /// - 複雑な背景や低解像度の画像では認識精度が低下する可能性があります
+  /// - Web環境では一部制限があります
+  static Future<Map<String, dynamic>> recognizeTextFromImage(
+      Uint8List imageBytes) async {
+    print('AI Service Debug: OCR機能開始（バイト配列）');
+    print('AI Service Debug: 画像データサイズ: ${imageBytes.length} bytes');
+
+    if (!isConfigured) {
+      print('AI Service Debug: OCR機能失敗 - 設定されていません');
+      return {
+        'success': false,
+        'error': 'AIサービスが設定されていません。設定画面でAPIキーを設定してください。',
+      };
+    }
+
+    try {
+      String? responseText;
+
+      // Web環境では最初からHTTP直接リクエストを使用
+      if (kIsWeb) {
+        print('AI Service Debug: Web環境でOCR用HTTP直接リクエストを使用');
+        responseText = await _makeOCRRequest(imageBytes);
+        if (responseText == null) {
+          throw Exception('Web環境でのOCR処理に失敗しました。\n\nAPIキーまたはネットワーク接続を確認してください。');
+        }
+      } else {
+        // ネイティブ環境ではSDKを使用
+        final model = _model;
+        if (model == null) {
+          print('AI Service Debug: OCR機能失敗 - モデルがnull');
+          throw Exception('AIモデルの初期化に失敗しました。');
+        }
+
+        final imageContent = DataPart('image/jpeg', imageBytes);
+
+        print('AI Service Debug: Gemini APIにOCRリクエスト送信中...');
+        final prompt = Content.multi([
+          TextPart('''
+この画像に写っている文字を正確に読み取り、フィールドワーク記録として解析してください。
+
+【分析内容】
+1. 画像内のすべての文字を認識・抽出
+2. 抽出したテキストから以下の情報を特定（可能な場合のみ）：
+   - 場所・位置情報（地名、座標、住所など）
+   - 日時・時間情報（日付、時刻など）
+   - 観察対象（動植物名、現象名など）
+   - 記録内容・メモ（観察事項、特徴など）
+   - カテゴリ（植物、動物、昆虫、鉱物、化石、地形など）
+
+【出力フォーマット】
+以下のJSON形式で回答してください（他の文章は一切含めないでください）：
+{
+  "extractedText": "抽出したすべてのテキスト",
+  "location": "位置情報（地名、座標など）",
+  "datetime": "日時情報",
+  "subject": "観察対象・タイトル",
+  "content": "記録内容・メモ",
+  "category": "カテゴリ",
+  "coordinates": {
+    "latitude": null,
+    "longitude": null
+  },
+  "confidence": "high/medium/low",
+  "notes": "補足情報"
+}
+
+注意事項：
+- 不明な項目はnullまたは空文字で設定
+- 座標は数値形式で抽出できた場合のみ設定
+- 文字認識の確信度も評価
+'''),
+          imageContent,
+        ]);
+
+        final response = await model.generateContent([prompt]);
+
+        print('AI Service Debug: OCRレスポンス受信');
+        print('AI Service Debug: レスポンステキスト: ${response.text}');
+
+        if (response.text == null || response.text!.isEmpty) {
+          print('AI Service Debug: OCR機能失敗 - 空のレスポンス');
+          throw Exception('OCR処理結果を取得できませんでした。');
+        }
+
+        responseText = response.text!;
+      }
+
+      // 共通のレスポンス処理
+      if (responseText != null && responseText.isNotEmpty) {
+        try {
+          // レスポンステキストを取得
+          String cleanedText = responseText.trim();
+
+          // JSONブロックを抽出（```json``` や余分なテキストを除去）
+          final jsonMatch = RegExp(r'\{[\s\S]*\}').firstMatch(cleanedText);
+          if (jsonMatch != null) {
+            cleanedText = jsonMatch.group(0)!;
+            print('AI Service Debug: OCR JSON抽出成功: $cleanedText');
+          } else {
+            print('AI Service Debug: OCR JSON抽出失敗、生テキストを使用');
+          }
+
+          final jsonResponse = json.decode(cleanedText);
+
+          // 座標の解析（文字列から数値に変換）
+          double? latitude;
+          double? longitude;
+          if (jsonResponse['coordinates'] != null) {
+            final coords = jsonResponse['coordinates'];
+            if (coords['latitude'] != null) {
+              latitude = _parseCoordinate(coords['latitude'].toString());
+            }
+            if (coords['longitude'] != null) {
+              longitude = _parseCoordinate(coords['longitude'].toString());
+            }
+          }
+
+          final result = {
+            'success': true,
+            'extractedText':
+                jsonResponse['extractedText']?.toString()?.trim() ?? '',
+            'location': jsonResponse['location']?.toString()?.trim(),
+            'datetime': jsonResponse['datetime']?.toString()?.trim(),
+            'subject': jsonResponse['subject']?.toString()?.trim(),
+            'content': jsonResponse['content']?.toString()?.trim(),
+            'category': jsonResponse['category']?.toString()?.trim(),
+            'latitude': latitude,
+            'longitude': longitude,
+            'confidence':
+                jsonResponse['confidence']?.toString()?.trim() ?? 'medium',
+            'notes': jsonResponse['notes']?.toString()?.trim(),
+          };
+
+          print('AI Service Debug: OCR処理結果: $result');
+          return result;
+        } catch (e) {
+          print('AI Service Debug: OCR JSON解析エラー: $e');
+          print('AI Service Debug: レスポンステキスト: $responseText');
+
+          // JSONパースに失敗した場合は、基本的なテキスト抽出のみ
+          return {
+            'success': true,
+            'extractedText': responseText,
+            'location': null,
+            'datetime': null,
+            'subject': 'OCR読み取り結果',
+            'content': responseText,
+            'category': 'その他',
+            'latitude': null,
+            'longitude': null,
+            'confidence': 'low',
+            'notes': 'JSON解析失敗のため基本的なテキスト抽出のみ',
+          };
+        }
+      }
+
+      return {
+        'success': false,
+        'error': 'OCR処理結果を取得できませんでした。',
+      };
+    } catch (e) {
+      print('AI Service Debug: OCR機能エラー詳細:');
+      print('AI Service Debug: エラータイプ: ${e.runtimeType}');
+      print('AI Service Debug: エラーメッセージ: $e');
+
+      final errorMessage = e.toString().toLowerCase();
+
+      String userFriendlyError;
+      if (errorMessage.contains('quota') || errorMessage.contains('exceeded')) {
+        userFriendlyError =
+            'Gemini APIの使用量制限に達しました。\n\n対処法：\n1. Google AI Studioで使用量を確認\n2. 課金設定を有効にする\n3. しばらく時間をおいてから再試行';
+      } else if (errorMessage.contains('503') ||
+          errorMessage.contains('overloaded')) {
+        userFriendlyError = 'AIサーバーが一時的に混雑しています。\nしばらく時間をおいてから再試行してください。';
+      } else if (errorMessage.contains('429')) {
+        userFriendlyError = 'API使用回数制限に達しました。\nしばらく時間をおいてから再試行してください。';
+      } else if (errorMessage.contains('401') || errorMessage.contains('403')) {
+        userFriendlyError = 'API認証に失敗しました。\nAPIキーが正しく設定されているか確認してください。';
+      } else {
+        userFriendlyError = 'OCR処理に失敗しました: ${e.toString()}';
+      }
+
+      return {
+        'success': false,
+        'error': userFriendlyError,
+      };
+    }
+  }
+
+  /// Web環境でのOCR用HTTP直接リクエスト
+  static Future<String?> _makeOCRRequest(Uint8List imageBytes) async {
+    if (!kIsWeb) return null;
+
+    try {
+      print('AI Service Debug: Web環境でOCR用HTTP直接リクエスト開始');
+      print('AI Service Debug: 画像データサイズ: ${imageBytes.length} bytes');
+
+      // 画像をBase64エンコード
+      final base64Image = base64Encode(imageBytes);
+      print('AI Service Debug: Base64エンコード完了');
+
+      final url = Uri.parse(
+          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$_apiKey');
+
+      final requestBody = {
+        'contents': [
+          {
+            'parts': [
+              {
+                'text': '''
+この画像に写っている文字を正確に読み取り、フィールドワーク記録として解析してください。
+
+【分析内容】
+1. 画像内のすべての文字を認識・抽出
+2. 抽出したテキストから以下の情報を特定（可能な場合のみ）：
+   - 場所・位置情報（地名、座標、住所など）
+   - 日時・時間情報（日付、時刻など）
+   - 観察対象（動植物名、現象名など）
+   - 記録内容・メモ（観察事項、特徴など）
+   - カテゴリ（植物、動物、昆虫、鉱物、化石、地形など）
+
+【出力フォーマット】
+以下のJSON形式で回答してください（他の文章は一切含めないでください）：
+{
+  "extractedText": "抽出したすべてのテキスト",
+  "location": "位置情報（地名、座標など）",
+  "datetime": "日時情報",
+  "subject": "観察対象・タイトル",
+  "content": "記録内容・メモ",
+  "category": "カテゴリ",
+  "coordinates": {
+    "latitude": null,
+    "longitude": null
+  },
+  "confidence": "high/medium/low",
+  "notes": "補足情報"
+}
+
+注意事項：
+- 不明な項目はnullまたは空文字で設定
+- 座標は数値形式で抽出できた場合のみ設定
+- 文字認識の確信度も評価
+'''
+              },
+              {
+                'inline_data': {'mime_type': 'image/jpeg', 'data': base64Image}
+              }
+            ]
+          }
+        ],
+        'generationConfig': {
+          'temperature': 0.3,
+          'topP': 0.95,
+          'maxOutputTokens': 2048,
+        }
+      };
+
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'User-Agent': 'location_memo/1.0',
+        },
+        body: json.encode(requestBody),
+      );
+
+      print(
+          'AI Service Debug: OCR HTTP直接リクエスト レスポンス状態: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        final text =
+            responseData['candidates']?[0]?['content']?['parts']?[0]?['text'];
+        print(
+            'AI Service Debug: OCR HTTP直接リクエスト 成功: ${text?.substring(0, text.length > 100 ? 100 : text.length)}...');
+        return text;
+      } else {
+        print('AI Service Debug: OCR HTTP直接リクエスト 失敗: ${response.statusCode}');
+        print('AI Service Debug: エラーレスポンス: ${response.body}');
+        return null;
+      }
+    } catch (e) {
+      print('AI Service Debug: OCR HTTP直接リクエスト エラー詳細:');
+      print('AI Service Debug: エラータイプ: ${e.runtimeType}');
+      print('AI Service Debug: エラーメッセージ: $e');
+      return null;
+    }
+  }
+
+  /// 座標文字列を数値に変換
+  static double? _parseCoordinate(String coordString) {
+    try {
+      // 数値として直接解析を試行
+      final coord = double.tryParse(coordString);
+      if (coord != null) {
+        return coord;
+      }
+
+      // 度分秒形式の座標を解析（例：35°41'22"N）
+      final dmsRegex =
+          RegExp(r'(\d+)°(\d+)' + "'" + r'(\d+(?:\.\d+)?)"?([NSEW])?');
+      final match = dmsRegex.firstMatch(coordString);
+      if (match != null) {
+        final degrees = double.parse(match.group(1)!);
+        final minutes = double.parse(match.group(2)!);
+        final seconds = double.parse(match.group(3)!);
+        final direction = match.group(4);
+
+        double decimal = degrees + minutes / 60 + seconds / 3600;
+
+        // 南緯・西経の場合は負の値
+        if (direction == 'S' || direction == 'W') {
+          decimal = -decimal;
+        }
+
+        return decimal;
+      }
+
+      return null;
+    } catch (e) {
+      print('AI Service Debug: 座標解析エラー: $e');
+      return null;
+    }
+  }
+
   /// API接続テスト
   static Future<bool> testApiConnection() async {
     print('AI Service Debug: API接続テスト開始');
@@ -363,7 +713,16 @@ class AIService {
     }
   }
 
-  /// 音声ファイルを文字起こし
+  /// 音声ファイルを文字起こし（ベータ版）
+  ///
+  /// 音声ファイルの内容を文字に変換します。
+  /// ベータ版のため、認識精度や機能が変更される可能性があります。
+  ///
+  /// 注意事項：
+  /// - Web環境では利用できません（モバイルアプリまたはデスクトップアプリをご利用ください）
+  /// - 音声の品質や環境音によって認識精度が変動する場合があります
+  /// - 専門用語や固有名詞の認識精度は限定的です
+  /// - 長い音声ファイルの場合は処理時間が長くなります
   static Future<String?> transcribeAudio(String audioFilePath) async {
     print('AI Service Debug: 音声文字起こし開始');
     print('AI Service Debug: 音声ファイルパス: $audioFilePath');
@@ -454,7 +813,15 @@ class AIService {
     }
   }
 
-  /// 画像データ（Uint8List）を分析してメモの内容を提案
+  /// 画像データ（Uint8List）を分析してメモの内容を提案（ベータ版）
+  ///
+  /// 画像を分析して自然観察記録の内容を自動生成します。
+  /// ベータ版のため、分析精度や機能が変更される可能性があります。
+  ///
+  /// 注意事項：
+  /// - 画像の品質や内容によって分析精度が変動する場合があります
+  /// - 複雑な画像や複数の対象が写っている場合は精度が低下する可能性があります
+  /// - 分析結果は参考情報としてご利用ください
   static Future<Map<String, String?>> analyzeImageBytes(
       Uint8List imageBytes) async {
     print('AI Service Debug: 画像分析開始（バイト配列）');
@@ -639,7 +1006,15 @@ class AIService {
     }
   }
 
-  /// テキストを分析してメモの改善を提案
+  /// テキストを分析してメモの改善を提案（ベータ版）
+  ///
+  /// 自然観察記録の内容をより詳細で科学的な記録に改善する提案を生成します。
+  /// ベータ版のため、改善提案の品質や機能が変更される可能性があります。
+  ///
+  /// 注意事項：
+  /// - 改善提案は参考情報としてご利用ください
+  /// - 専門用語や科学的な記述の正確性は限定的です
+  /// - 元の内容の意図を完全に理解できない場合があります
   static Future<String> improveMemoContent(String currentContent) async {
     print('AI Service Debug: テキスト改善開始');
     print('AI Service Debug: 現在のコンテンツ長: ${currentContent.length}');
@@ -722,7 +1097,16 @@ $currentContent
     }
   }
 
-  /// 質問応答機能
+  /// 質問応答機能（ベータ版）
+  ///
+  /// フィールドワークと自然観察に関する質問に回答します。
+  /// ベータ版のため、回答の品質や機能が変更される可能性があります。
+  ///
+  /// 注意事項：
+  /// - 回答は参考情報としてご利用ください
+  /// - 科学的な正確性は限定的です
+  /// - 専門的な質問には適切に回答できない場合があります
+  /// - 過去の観察記録との関連性は限定的です
   static Future<String> askQuestion(String question, List<Memo> context) async {
     print('AI Service Debug: 質問応答開始');
     print('AI Service Debug: 質問: $question');
@@ -889,5 +1273,366 @@ $contextInfo
     }
 
     return 'その他';
+  }
+
+  /// 複数地点の記録を画像から一括読み取り（OCR機能・ベータ版）
+  ///
+  /// 画像に写っている複数のフィールドワーク記録を一括で読み取り、解析します。
+  /// ベータ版のため、認識精度や機能が変更される可能性があります。
+  ///
+  /// 注意事項：
+  /// - 複雑なレイアウトや手書き文字の場合は認識精度が低下する可能性があります
+  /// - 地図上の記録とテキスト記録の関連付けは限定的です
+  /// - 座標の自動変換機能は実験的な機能です
+  /// - 大量の記録がある場合は処理時間が長くなる場合があります
+  static Future<Map<String, dynamic>> recognizeMultipleRecordsFromImage(
+      Uint8List imageBytes) async {
+    print('AI Service Debug: 複数地点OCR機能開始（バイト配列）');
+    print('AI Service Debug: 画像データサイズ: ${imageBytes.length} bytes');
+
+    if (!isConfigured) {
+      print('AI Service Debug: 複数地点OCR機能失敗 - 設定されていません');
+      return {
+        'success': false,
+        'error': 'AIサービスが設定されていません。設定画面でAPIキーを設定してください。',
+      };
+    }
+
+    try {
+      String? responseText;
+
+      // Web環境では最初からHTTP直接リクエストを使用
+      if (kIsWeb) {
+        print('AI Service Debug: Web環境で複数地点OCR用HTTP直接リクエストを使用');
+        responseText = await _makeMultipleRecordsOCRRequest(imageBytes);
+        if (responseText == null) {
+          throw Exception(
+              'Web環境での複数地点OCR処理に失敗しました。\n\nAPIキーまたはネットワーク接続を確認してください。');
+        }
+      } else {
+        // ネイティブ環境ではSDKを使用
+        final model = _model;
+        if (model == null) {
+          print('AI Service Debug: 複数地点OCR機能失敗 - モデルがnull');
+          throw Exception('AIモデルの初期化に失敗しました。');
+        }
+
+        final imageContent = DataPart('image/jpeg', imageBytes);
+
+        print('AI Service Debug: Gemini APIに複数地点OCRリクエスト送信中...');
+        final prompt = Content.multi([
+          TextPart('''
+この画像に写っているフィールドワーク記録を分析して、複数の観察地点の記録を抽出してください。
+
+【分析対象】
+- 手書きまたは印刷された複数の観察記録
+- 各記録に含まれる位置情報、観察内容、日時などの情報
+- 地図やスケッチに記載された複数の地点情報
+
+【抽出する情報】
+各記録について以下の項目を特定してください：
+1. 位置情報（地名、座標、住所、目印など）
+2. 観察対象・タイトル（動植物名、現象名など）
+3. 観察内容・記録（詳細な記述、特徴など）
+4. カテゴリ（植物、動物、昆虫、鉱物、化石、地形、その他）
+5. 日時情報（記録された日付・時刻）
+6. その他の情報（発見者、標本番号、備考など）
+
+【出力フォーマット】
+以下のJSON形式で回答してください（他の文章は一切含めないでください）：
+{
+  "success": true,
+  "totalRecords": 0,
+  "extractedText": "画像から抽出したすべてのテキスト",
+  "records": [
+    {
+      "title": "観察対象名",
+      "content": "詳細な観察記録",
+      "location": "位置情報",
+      "coordinates": {
+        "latitude": null,
+        "longitude": null
+      },
+      "category": "カテゴリ",
+      "datetime": "日時情報",
+      "discoverer": "発見者",
+      "specimenNumber": "標本番号",
+      "notes": "備考・その他情報",
+      "confidence": "high/medium/low"
+    }
+  ],
+  "confidence": "overall confidence level",
+  "notes": "全体的な補足情報"
+}
+
+【重要な注意事項】
+- 複数の記録が含まれている場合は、それぞれを個別のrecordとして抽出
+- 位置情報が不明確な場合でも、他の情報があれば記録として抽出
+- 座標は度分秒形式や十進形式で記載されている場合は数値に変換
+- 不明な項目はnullまたは空文字で設定
+- 各記録の信頼度も個別に評価
+- 地図上のマーカーや番号と記録を関連付けて解析
+'''),
+          imageContent,
+        ]);
+
+        final response = await model.generateContent([prompt]);
+
+        print('AI Service Debug: 複数地点OCRレスポンス受信');
+        print('AI Service Debug: レスポンステキスト: ${response.text}');
+
+        if (response.text == null || response.text!.isEmpty) {
+          print('AI Service Debug: 複数地点OCR機能失敗 - 空のレスポンス');
+          throw Exception('複数地点OCR処理結果を取得できませんでした。');
+        }
+
+        responseText = response.text!;
+      }
+
+      // 共通のレスポンス処理
+      if (responseText != null && responseText.isNotEmpty) {
+        try {
+          // レスポンステキストを取得
+          String cleanedText = responseText.trim();
+
+          // JSONブロックを抽出（```json``` や余分なテキストを除去）
+          final jsonMatch = RegExp(r'\{[\s\S]*\}').firstMatch(cleanedText);
+          if (jsonMatch != null) {
+            cleanedText = jsonMatch.group(0)!;
+            print('AI Service Debug: 複数地点OCR JSON抽出成功: $cleanedText');
+          } else {
+            print('AI Service Debug: 複数地点OCR JSON抽出失敗、生テキストを使用');
+          }
+
+          final jsonResponse = json.decode(cleanedText);
+
+          // 各記録の座標を解析
+          final records = <Map<String, dynamic>>[];
+          if (jsonResponse['records'] != null) {
+            for (final record in jsonResponse['records']) {
+              double? latitude;
+              double? longitude;
+              if (record['coordinates'] != null) {
+                final coords = record['coordinates'];
+                if (coords['latitude'] != null) {
+                  latitude = _parseCoordinate(coords['latitude'].toString());
+                }
+                if (coords['longitude'] != null) {
+                  longitude = _parseCoordinate(coords['longitude'].toString());
+                }
+              }
+
+              records.add({
+                'title': record['title']?.toString()?.trim() ?? '観察記録',
+                'content': record['content']?.toString()?.trim() ?? '',
+                'location': record['location']?.toString()?.trim(),
+                'latitude': latitude,
+                'longitude': longitude,
+                'category': record['category']?.toString()?.trim() ?? 'その他',
+                'datetime': record['datetime']?.toString()?.trim(),
+                'discoverer': record['discoverer']?.toString()?.trim(),
+                'specimenNumber': record['specimenNumber']?.toString()?.trim(),
+                'notes': record['notes']?.toString()?.trim(),
+                'confidence':
+                    record['confidence']?.toString()?.trim() ?? 'medium',
+              });
+            }
+          }
+
+          final result = {
+            'success': true,
+            'totalRecords': records.length,
+            'extractedText':
+                jsonResponse['extractedText']?.toString()?.trim() ?? '',
+            'records': records,
+            'confidence':
+                jsonResponse['confidence']?.toString()?.trim() ?? 'medium',
+            'notes': jsonResponse['notes']?.toString()?.trim() ?? '',
+          };
+
+          print('AI Service Debug: 複数地点OCR処理結果: ${records.length}件の記録を抽出');
+          return result;
+        } catch (e) {
+          print('AI Service Debug: 複数地点OCR JSON解析エラー: $e');
+          print('AI Service Debug: レスポンステキスト: $responseText');
+
+          // JSONパースに失敗した場合は、基本的なテキスト抽出のみ
+          return {
+            'success': true,
+            'totalRecords': 1,
+            'extractedText': responseText,
+            'records': [
+              {
+                'title': 'OCR読み取り結果',
+                'content': responseText,
+                'location': null,
+                'latitude': null,
+                'longitude': null,
+                'category': 'その他',
+                'datetime': null,
+                'discoverer': null,
+                'specimenNumber': null,
+                'notes': 'JSON解析失敗のため基本的なテキスト抽出のみ',
+                'confidence': 'low',
+              }
+            ],
+            'confidence': 'low',
+            'notes': 'JSON解析失敗のため基本的なテキスト抽出のみ',
+          };
+        }
+      }
+
+      return {
+        'success': false,
+        'error': '複数地点OCR処理結果を取得できませんでした。',
+      };
+    } catch (e) {
+      print('AI Service Debug: 複数地点OCR機能エラー詳細:');
+      print('AI Service Debug: エラータイプ: ${e.runtimeType}');
+      print('AI Service Debug: エラーメッセージ: $e');
+
+      final errorMessage = e.toString().toLowerCase();
+
+      String userFriendlyError;
+      if (errorMessage.contains('quota') || errorMessage.contains('exceeded')) {
+        userFriendlyError =
+            'Gemini APIの使用量制限に達しました。\n\n対処法：\n1. Google AI Studioで使用量を確認\n2. 課金設定を有効にする\n3. しばらく時間をおいてから再試行';
+      } else if (errorMessage.contains('503') ||
+          errorMessage.contains('overloaded')) {
+        userFriendlyError = 'AIサーバーが一時的に混雑しています。\nしばらく時間をおいてから再試行してください。';
+      } else if (errorMessage.contains('429')) {
+        userFriendlyError = 'API使用回数制限に達しました。\nしばらく時間をおいてから再試行してください。';
+      } else if (errorMessage.contains('401') || errorMessage.contains('403')) {
+        userFriendlyError = 'API認証に失敗しました。\nAPIキーが正しく設定されているか確認してください。';
+      } else {
+        userFriendlyError = '複数地点OCR処理に失敗しました: ${e.toString()}';
+      }
+
+      return {
+        'success': false,
+        'error': userFriendlyError,
+      };
+    }
+  }
+
+  /// Web環境での複数地点OCR用HTTP直接リクエスト
+  static Future<String?> _makeMultipleRecordsOCRRequest(
+      Uint8List imageBytes) async {
+    if (!kIsWeb) return null;
+
+    try {
+      print('AI Service Debug: Web環境で複数地点OCR用HTTP直接リクエスト開始');
+      print('AI Service Debug: 画像データサイズ: ${imageBytes.length} bytes');
+
+      // 画像をBase64エンコード
+      final base64Image = base64Encode(imageBytes);
+      print('AI Service Debug: Base64エンコード完了');
+
+      final url = Uri.parse(
+          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$_apiKey');
+
+      final requestBody = {
+        'contents': [
+          {
+            'parts': [
+              {
+                'text': '''
+この画像に写っているフィールドワーク記録を分析して、複数の観察地点の記録を抽出してください。
+
+【分析対象】
+- 手書きまたは印刷された複数の観察記録
+- 各記録に含まれる位置情報、観察内容、日時などの情報
+- 地図やスケッチに記載された複数の地点情報
+
+【抽出する情報】
+各記録について以下の項目を特定してください：
+1. 位置情報（地名、座標、住所、目印など）
+2. 観察対象・タイトル（動植物名、現象名など）
+3. 観察内容・記録（詳細な記述、特徴など）
+4. カテゴリ（植物、動物、昆虫、鉱物、化石、地形、その他）
+5. 日時情報（記録された日付・時刻）
+6. その他の情報（発見者、標本番号、備考など）
+
+【出力フォーマット】
+以下のJSON形式で回答してください（他の文章は一切含めないでください）：
+{
+  "success": true,
+  "totalRecords": 0,
+  "extractedText": "画像から抽出したすべてのテキスト",
+  "records": [
+    {
+      "title": "観察対象名",
+      "content": "詳細な観察記録",
+      "location": "位置情報",
+      "coordinates": {
+        "latitude": null,
+        "longitude": null
+      },
+      "category": "カテゴリ",
+      "datetime": "日時情報",
+      "discoverer": "発見者",
+      "specimenNumber": "標本番号",
+      "notes": "備考・その他情報",
+      "confidence": "high/medium/low"
+    }
+  ],
+  "confidence": "overall confidence level",
+  "notes": "全体的な補足情報"
+}
+
+【重要な注意事項】
+- 複数の記録が含まれている場合は、それぞれを個別のrecordとして抽出
+- 位置情報が不明確な場合でも、他の情報があれば記録として抽出
+- 座標は度分秒形式や十進形式で記載されている場合は数値に変換
+- 不明な項目はnullまたは空文字で設定
+- 各記録の信頼度も個別に評価
+- 地図上のマーカーや番号と記録を関連付けて解析
+'''
+              },
+              {
+                'inline_data': {'mime_type': 'image/jpeg', 'data': base64Image}
+              }
+            ]
+          }
+        ],
+        'generationConfig': {
+          'temperature': 0.3,
+          'topP': 0.95,
+          'maxOutputTokens': 4096,
+        }
+      };
+
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'User-Agent': 'location_memo/1.0',
+        },
+        body: json.encode(requestBody),
+      );
+
+      print(
+          'AI Service Debug: 複数地点OCR HTTP直接リクエスト レスポンス状態: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        final text =
+            responseData['candidates']?[0]?['content']?['parts']?[0]?['text'];
+        print(
+            'AI Service Debug: 複数地点OCR HTTP直接リクエスト 成功: ${text?.substring(0, text.length > 100 ? 100 : text.length)}...');
+        return text;
+      } else {
+        print(
+            'AI Service Debug: 複数地点OCR HTTP直接リクエスト 失敗: ${response.statusCode}');
+        print('AI Service Debug: エラーレスポンス: ${response.body}');
+        return null;
+      }
+    } catch (e) {
+      print('AI Service Debug: 複数地点OCR HTTP直接リクエスト エラー詳細:');
+      print('AI Service Debug: エラータイプ: ${e.runtimeType}');
+      print('AI Service Debug: エラーメッセージ: $e');
+      return null;
+    }
   }
 }

@@ -474,10 +474,34 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         source = await showDialog<ImageSource>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('画像を選択'),
+            title: const Text('画像を選択（AI分析・開発中）'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.warning_amber, color: Colors.orange, size: 16),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'AI画像分析機能は開発中です。分析精度や機能が変更される可能性があります。',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.orange,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 ListTile(
                   leading: const Icon(Icons.camera_alt),
                   title: const Text('カメラで撮影'),
@@ -1041,7 +1065,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('改善提案'),
+          title: const Text('改善提案（開発中）'),
           content: SingleChildScrollView(
             child: Text(improved),
           ),
@@ -1107,7 +1131,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('AIに質問'),
+        title: const Text('AIに質問（開発中）'),
         content: TextField(
           controller: controller,
           decoration: const InputDecoration(
@@ -1716,8 +1740,9 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                                       CircularProgressIndicator(strokeWidth: 2),
                                 )
                               : const Icon(Icons.text_fields),
-                          label: Text(
-                              _isTranscribing ? '文字起こし中...' : '🤖 音声を文字起こし'),
+                          label: Text(_isTranscribing
+                              ? '文字起こし中...'
+                              : '🤖 音声を文字起こし（開発中）'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.purple,
                             foregroundColor: Colors.white,
@@ -1758,7 +1783,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              '「音声を文字起こし」ボタンでAIによる自動文字起こしができます',
+                              '「音声を文字起こし」ボタンでAIによる自動文字起こしができます（開発中）',
                               style: TextStyle(
                                 color: Colors.green.shade600,
                                 fontSize: 11,

@@ -3,10 +3,12 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:hive/hive.dart';
 import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 import '../models/memo.dart';
 import '../models/map_info.dart';
 import '../utils/database_helper.dart';
 import '../utils/print_helper.dart';
+import '../utils/ai_service.dart';
 import '../widgets/custom_map_widget.dart';
 import 'memo_detail_screen.dart';
 import 'memo_list_screen.dart';
@@ -28,6 +30,7 @@ class _MapScreenState extends State<MapScreen> {
   List<int> _layers = [0]; // 利用可能なレイヤー一覧
   final GlobalKey<CustomMapWidgetState> _mapWidgetKey =
       GlobalKey<CustomMapWidgetState>();
+  bool _isOCRProcessing = false; // OCR処理中フラグ
   Box? _layerNameBox; // レイヤー名ボックス
 
   String _layerDisplayName(int layer) {
@@ -188,6 +191,375 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  // 複数地点記録OCR機能
+  Future<void> _performMultipleRecordsOCR() async {
+    final ImagePicker picker = ImagePicker();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('📄 複数地点記録を読み取り（開発中）'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('複数の観察地点が記録された紙を写真に撮って\n一括で地図に追加します。'),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.withOpacity(0.3)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.warning_amber, color: Colors.orange, size: 16),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'この機能は開発中です。認識精度や機能が変更される可能性があります。',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.orange,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: Colors.blue),
+              title: const Text('カメラで撮影'),
+              onTap: () async {
+                Navigator.pop(context);
+                final XFile? image = await picker.pickImage(
+                  source: ImageSource.camera,
+                  imageQuality: 85,
+                );
+                if (image != null) {
+                  await _processMultipleRecordsOCRImage(image);
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: Colors.green),
+              title: const Text('ギャラリーから選択'),
+              onTap: () async {
+                Navigator.pop(context);
+                final XFile? image = await picker.pickImage(
+                  source: ImageSource.gallery,
+                  imageQuality: 85,
+                );
+                if (image != null) {
+                  await _processMultipleRecordsOCRImage(image);
+                }
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('キャンセル'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 複数地点OCR画像処理
+  Future<void> _processMultipleRecordsOCRImage(XFile imageFile) async {
+    setState(() {
+      _isOCRProcessing = true;
+    });
+
+    try {
+      print('Map Debug: 複数地点OCR処理開始');
+      print('Map Debug: 画像パス: ${imageFile.path}');
+
+      // 画像をバイト配列として読み込み
+      final imageBytes = await imageFile.readAsBytes();
+      print('Map Debug: 画像サイズ: ${imageBytes.length} bytes');
+
+      // 複数地点OCR処理を実行
+      final result =
+          await AIService.recognizeMultipleRecordsFromImage(imageBytes);
+      print('Map Debug: 複数地点OCR結果: $result');
+
+      if (result['success'] == true) {
+        // OCR結果をダイアログで表示し、ユーザーに適用を確認
+        await _showMultipleRecordsOCRResult(result);
+      } else {
+        throw Exception(result['error'] ?? '複数地点OCR処理に失敗しました');
+      }
+    } catch (e) {
+      print('Map Debug: 複数地点OCR処理エラー詳細:');
+      print('Map Debug: エラータイプ: ${e.runtimeType}');
+      print('Map Debug: エラーメッセージ: $e');
+      print('Map Debug: エラートレース: ${StackTrace.current}');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('複数地点記録の読み取りに失敗しました'),
+              if (kIsWeb) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'デバッグ: ${e.runtimeType}',
+                  style: const TextStyle(fontSize: 10, color: Colors.white70),
+                ),
+              ],
+              const SizedBox(height: 4),
+              Text(
+                'エラー: ${e.toString()}',
+                style: const TextStyle(fontSize: 11, color: Colors.white70),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 6),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      setState(() {
+        _isOCRProcessing = false;
+      });
+    }
+  }
+
+  // 複数地点OCR結果表示・適用ダイアログ
+  Future<void> _showMultipleRecordsOCRResult(
+      Map<String, dynamic> result) async {
+    final totalRecords = result['totalRecords'] ?? 0;
+    final extractedText = result['extractedText'] ?? '';
+    final records = result['records'] as List<dynamic>? ?? [];
+    final confidence = result['confidence'] ?? 'medium';
+    final notes = result['notes'] ?? '';
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('📄 読み取り結果（${totalRecords}件の記録）'),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 400,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (extractedText.isNotEmpty) ...[
+                  const Text('📝 抽出されたテキスト:',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(8),
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(extractedText,
+                        style: const TextStyle(fontSize: 12)),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                const Text('📋 抽出された記録:',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                ...records.asMap().entries.map((entry) {
+                  final index = entry.key;
+                  final record = entry.value;
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('記録 ${index + 1}',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue)),
+                        const SizedBox(height: 4),
+                        if (record['title'] != null &&
+                            record['title'].toString().isNotEmpty) ...[
+                          Text('タイトル: ${record['title']}'),
+                          const SizedBox(height: 2),
+                        ],
+                        if (record['content'] != null &&
+                            record['content'].toString().isNotEmpty) ...[
+                          Text('内容: ${record['content']}'),
+                          const SizedBox(height: 2),
+                        ],
+                        if (record['location'] != null &&
+                            record['location'].toString().isNotEmpty) ...[
+                          Text('場所: ${record['location']}'),
+                          const SizedBox(height: 2),
+                        ],
+                        if (record['latitude'] != null &&
+                            record['longitude'] != null) ...[
+                          Text(
+                              '座標: ${record['latitude'].toStringAsFixed(6)}, ${record['longitude'].toStringAsFixed(6)}'),
+                          const SizedBox(height: 2),
+                        ],
+                        if (record['category'] != null &&
+                            record['category'].toString().isNotEmpty) ...[
+                          Text('カテゴリ: ${record['category']}'),
+                          const SizedBox(height: 2),
+                        ],
+                        Text(
+                            '認識精度: ${_getConfidenceText(record['confidence'] ?? 'medium')}',
+                            style: TextStyle(
+                              color: _getConfidenceColor(
+                                  record['confidence'] ?? 'medium'),
+                              fontSize: 12,
+                            )),
+                      ],
+                    ),
+                  );
+                }).toList(),
+                if (notes.isNotEmpty) ...[
+                  const Divider(),
+                  const Text('備考:',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text(notes, style: const TextStyle(fontSize: 12)),
+                ],
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('キャンセル'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _applyMultipleRecordsResult(records);
+            },
+            child: Text('地図に追加（${records.length}件）'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 複数地点OCR結果を地図に適用
+  Future<void> _applyMultipleRecordsResult(List<dynamic> records) async {
+    int successCount = 0;
+    int failureCount = 0;
+
+    try {
+      // 現在の地図IDを取得
+      final currentMapId = widget.mapInfo?.id;
+      if (currentMapId == null) {
+        throw Exception('地図IDが取得できません');
+      }
+
+      for (final record in records) {
+        try {
+          // 同じレイヤーの既存メモを取得して次のピン番号を決定
+          final existingMemos =
+              await DatabaseHelper.instance.readMemosByMapId(currentMapId);
+          final layerMemos = existingMemos
+              .where((memo) => (memo.layer ?? 0) == _currentLayer)
+              .toList();
+          int nextPinNumber = 1;
+          if (layerMemos.isNotEmpty) {
+            final maxPinNumber = layerMemos
+                .where((memo) => memo.pinNumber != null)
+                .map((memo) => memo.pinNumber!)
+                .fold(0, (max, number) => number > max ? number : max);
+            nextPinNumber = maxPinNumber + 1;
+          }
+
+          // メモオブジェクトを作成
+          final memo = Memo(
+            title: record['title']?.toString()?.trim() ?? '読み取り記録',
+            content: record['content']?.toString()?.trim() ?? '',
+            latitude: record['latitude'],
+            longitude: record['longitude'],
+            discoveryTime: DateTime.now(), // 現在時刻をデフォルトとして使用
+            discoverer: record['discoverer']?.toString()?.trim(),
+            specimenNumber: record['specimenNumber']?.toString()?.trim(),
+            category: record['category']?.toString()?.trim(),
+            notes: record['notes']?.toString()?.trim(),
+            pinNumber: nextPinNumber + successCount, // 順番にピン番号を割り当て
+            mapId: currentMapId,
+            layer: _currentLayer,
+          );
+
+          // データベースに保存
+          await DatabaseHelper.instance.create(memo);
+          successCount++;
+        } catch (e) {
+          print('Map Debug: 記録の保存に失敗: ${record['title']}, エラー: $e');
+          failureCount++;
+        }
+      }
+
+      // メモリストを再読み込み
+      await _loadMemos();
+
+      // 結果をユーザーに通知
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              '複数地点記録を地図に追加しました\n成功: ${successCount}件, 失敗: ${failureCount}件'),
+          backgroundColor: failureCount == 0 ? Colors.green : Colors.orange,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } catch (e) {
+      print('Map Debug: 複数地点記録適用エラー: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('複数地点記録の適用に失敗しました: ${e.toString()}'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
+  // 認識精度のテキストを取得
+  String _getConfidenceText(String confidence) {
+    switch (confidence.toLowerCase()) {
+      case 'high':
+        return '高い';
+      case 'medium':
+        return '中程度';
+      case 'low':
+        return '低い';
+      default:
+        return '不明';
+    }
+  }
+
+  // 認識精度の色を取得
+  Color _getConfidenceColor(String confidence) {
+    switch (confidence.toLowerCase()) {
+      case 'high':
+        return Colors.green;
+      case 'medium':
+        return Colors.orange;
+      case 'low':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -243,6 +615,18 @@ class _MapScreenState extends State<MapScreen> {
                 ),
               ),
             ],
+          ),
+          // OCRボタン（複数地点記録読み取り）
+          IconButton(
+            icon: _isOCRProcessing
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.document_scanner, color: Colors.purple),
+            tooltip: '複数地点記録を読み取り',
+            onPressed: _isOCRProcessing ? null : _performMultipleRecordsOCR,
           ),
           // 印刷ボタン
           PopupMenuButton<String>(
