@@ -4,6 +4,7 @@ import '../models/map_info.dart';
 import '../utils/database_helper.dart';
 import '../utils/image_helper.dart';
 import 'location_picker_screen.dart';
+import 'dart:io';
 
 class MemoDetailScreen extends StatefulWidget {
   final Memo memo;
@@ -906,7 +907,7 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                   context: context,
                   builder: (context) => AlertDialog(
                     title: const Text('削除確認'),
-                    content: const Text('この記録を削除しますか？'),
+                    content: const Text('この記録を削除しますか？\n関連する画像や音声ファイルも削除されます。'),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(context, false),
@@ -914,6 +915,9 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                       ),
                       TextButton(
                         onPressed: () => Navigator.pop(context, true),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.red,
+                        ),
                         child: const Text('削除'),
                       ),
                     ],
@@ -921,8 +925,53 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                 );
 
                 if (shouldDelete == true) {
-                  await DatabaseHelper.instance.delete(widget.memo.id!);
-                  Navigator.pop(context, true);
+                  try {
+                    // 画像ファイルを削除
+                    if (widget.memo.imagePaths != null &&
+                        widget.memo.imagePaths!.isNotEmpty) {
+                      for (final imagePath in widget.memo.imagePaths!) {
+                        final imageFile = File(imagePath);
+                        if (await imageFile.exists()) {
+                          await imageFile.delete();
+                        }
+                      }
+                    }
+
+                    // 音声ファイルを削除
+                    if (widget.memo.audioPath != null &&
+                        widget.memo.audioPath!.isNotEmpty) {
+                      final audioFile = File(widget.memo.audioPath!);
+                      if (await audioFile.exists()) {
+                        await audioFile.delete();
+                      }
+                    }
+
+                    // データベースから削除
+                    await DatabaseHelper.instance.delete(widget.memo.id!);
+
+                    // 成功メッセージを表示
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('記録を削除しました'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                    }
+
+                    // 画面を閉じて、削除が成功したことを通知
+                    Navigator.pop(context, true);
+                  } catch (e) {
+                    // エラーメッセージを表示
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('削除に失敗しました: $e'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  }
                 }
               },
             ),
