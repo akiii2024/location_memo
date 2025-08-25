@@ -913,7 +913,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('📧 お問い合わせ'),
+        title: const Text('📝 お問い合わせ'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -987,7 +987,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'メールアプリが起動し、開発者宛のメールが作成されます。'
+                    'Google Formが開きます。'
                     'お問い合わせ内容を記入して送信してください。',
                     style: TextStyle(
                       fontSize: 12,
@@ -1005,9 +1005,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: const Text('キャンセル'),
           ),
           ElevatedButton.icon(
-            onPressed: _sendContactEmail,
-            icon: const Icon(Icons.email),
-            label: const Text('メールを送信'),
+            onPressed: _openContactForm,
+            icon: const Icon(Icons.open_in_browser),
+            label: const Text('フォームを開く'),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.blue,
               foregroundColor: Colors.white,
@@ -1018,55 +1018,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Future<void> _sendContactEmail() async {
-    final Uri emailUri = Uri(
-      scheme: 'mailto',
-      path: 'a601023053@st.tachibana-u.ac.jp',
-      query: _encodeQueryParameters({
-        'subject': '[Location Memo] お問い合わせ',
-        'body': '''お問い合わせ内容を記入してください。
-
----
-アプリ情報:
-• アプリ名: ${AppInfo.appName}
-• バージョン: ${AppInfo.version}
-• プラットフォーム: ${Theme.of(context).platform}
----
-''',
-      }),
+  Future<void> _openContactForm() async {
+    final Uri formUri = Uri.parse(
+      'https://docs.google.com/forms/d/e/1FAIpQLSdXoVEFSNiFam-GKOVesRgyW4OM0O0cjLGeJzySjX09bp-juw/viewform?usp=header',
     );
 
     try {
-      if (await canLaunchUrl(emailUri)) {
-        await launchUrl(emailUri);
+      if (await canLaunchUrl(formUri)) {
+        await launchUrl(formUri, mode: LaunchMode.externalApplication);
         Navigator.pop(context); // ダイアログを閉じる
       } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('メールアプリを起動できませんでした'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+        await launchUrl(formUri, mode: LaunchMode.platformDefault);
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('エラーが発生しました: $e'),
+            content: Text('お問い合わせフォームを開けませんでした: $e'),
             backgroundColor: Colors.red,
           ),
         );
       }
     }
-  }
-
-  String? _encodeQueryParameters(Map<String, String> params) {
-    return params.entries
-        .map((e) =>
-            '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
-        .join('&');
   }
 
   void _showDefaultValuesDialog() {
@@ -1192,9 +1165,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Card(
             elevation: 2,
             child: ListTile(
-              leading: Icon(Icons.email, color: Colors.teal.shade600),
+              leading: Icon(Icons.feedback, color: Colors.teal.shade600),
               title: const Text('お問い合わせ'),
-              subtitle: const Text('ご意見・ご質問・バグ報告など'),
+              subtitle: const Text('ご意見・ご質問・バグ報告（Google Form）'),
               trailing: const Icon(Icons.arrow_forward_ios, size: 16),
               onTap: _showContactDialog,
             ),

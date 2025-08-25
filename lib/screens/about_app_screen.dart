@@ -77,6 +77,7 @@ class AboutAppScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
+            /*
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -159,7 +160,7 @@ class AboutAppScreen extends StatelessWidget {
                   onTap: () async {
                     final Uri emailUri = Uri(
                       scheme: 'mailto',
-                      path: 'a601023053@st.tachibana-u.ac.jp',
+                      path: 'example@example.com',
                     );
 
                     try {
@@ -205,15 +206,7 @@ class AboutAppScreen extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            const Text(
-              'Concept by',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'NotoSansJP',
-              ),
-            ),
+            */
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -304,7 +297,82 @@ class AboutAppScreen extends StatelessWidget {
               ],
             ),
 
-            const Spacer(),
+            const SizedBox(height: 48),
+
+            // 開発状況リンク
+            const Text(
+              '開発状況',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'NotoSansJP',
+              ),
+            ),
+            const SizedBox(height: 16),
+            Center(
+              child: GestureDetector(
+                onTap: () async {
+                  final Uri url =
+                      Uri.parse('https://trello.com/b/ZV0wMiZc/location-memo');
+                  try {
+                    if (await canLaunchUrl(url)) {
+                      await launchUrl(url,
+                          mode: LaunchMode.externalApplication);
+                    } else {
+                      // フォールバック: デフォルトブラウザで開く
+                      await launchUrl(url, mode: LaunchMode.platformDefault);
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Trelloページを開けませんでした: $e'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  }
+                },
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0079BF), // Trelloのブランドカラー
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.15),
+                        spreadRadius: 1,
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.dashboard, // Trelloのダッシュボードアイコン
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 12),
+                      const Text(
+                        '開発状況を見る',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: 'NotoSansJP',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
 
             // 開発版注意書き
             Container(
