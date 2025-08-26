@@ -34,7 +34,6 @@ dependencies:
   url_launcher: ^6.2.5
   http: ^1.1.0
   flutter_svg: ^2.0.10+1
-  flutter_dotenv: ^6.0.0
 
 dev_dependencies:
   flutter_test:
@@ -70,7 +69,6 @@ flutter:
   # アセット設定を追加
   assets:
     - assets/icons/
-    - .env
 
   # フォント設定を追加
   fonts:
