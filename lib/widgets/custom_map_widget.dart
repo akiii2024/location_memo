@@ -301,22 +301,43 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
           final RenderBox renderBox = context.findRenderObject() as RenderBox;
           final localPosition = renderBox.globalToLocal(details.globalPosition);
 
-          // 変換行列を考慮して実際の画像上での位置を計算
+          // まず、タップ位置が画像表示領域内かどうかを確認
+          if (localPosition.dx < _offsetX ||
+              localPosition.dx > _offsetX + _actualDisplayWidth ||
+              localPosition.dy < _offsetY ||
+              localPosition.dy > _offsetY + _actualDisplayHeight) {
+            return; // 画像外のタップは無視
+          }
+
+          // 画像表示領域内の相対座標を計算（ズーム・パン変換前）
+          final Offset imageLocalPosition = Offset(
+            localPosition.dx - _offsetX,
+            localPosition.dy - _offsetY,
+          );
+
+          // InteractiveViewerの変換を適用
           final Matrix4 matrix = _transformationController.value;
           final Matrix4? invertedMatrix = Matrix4.tryInvert(matrix);
           if (invertedMatrix == null) return;
-          final Offset imagePosition = MatrixUtils.transformPoint(
+
+          // 画像表示領域を基準とした座標で変換
+          final Offset transformedPosition = MatrixUtils.transformPoint(
             invertedMatrix,
-            localPosition,
+            imageLocalPosition,
           );
 
-          // 画像のサイズに対する相対位置（0.0〜1.0）を計算（実際の表示サイズを使用）
-          final double relativeX =
-              (imagePosition.dx - _offsetX) / _actualDisplayWidth;
+          // 相対座標（0.0〜1.0）に変換
+          final double relativeX = transformedPosition.dx / _actualDisplayWidth;
           final double relativeY =
-              (imagePosition.dy - _offsetY) / _actualDisplayHeight;
+              transformedPosition.dy / _actualDisplayHeight;
 
-          widget.onTap(relativeX, relativeY);
+          // 範囲チェック - 正規化座標が有効範囲内かを確認
+          if (relativeX >= 0.0 &&
+              relativeX <= 1.0 &&
+              relativeY >= 0.0 &&
+              relativeY <= 1.0) {
+            widget.onTap(relativeX, relativeY);
+          }
         },
         child: Container(
           width: _mapWidth,
