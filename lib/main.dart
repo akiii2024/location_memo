@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
 import 'package:location_memo/screens/main_screen.dart';
 import 'package:location_memo/screens/splash_screen.dart';
@@ -6,12 +8,25 @@ import 'package:location_memo/utils/theme_provider.dart';
 import 'package:location_memo/utils/app_info.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized;
-  // Hive 初期化（永続データ用）
+import 'firebase_options.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   await Hive.initFlutter();
   await AppInfo.init();
+  await _initializeFirebase();
   runApp(const MyApp());
+}
+
+Future<void> _initializeFirebase() async {
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (error, stackTrace) {
+    debugPrint('Firebase initialization failed: $error');
+    debugPrintStack(stackTrace: stackTrace);
+  }
 }
 
 class MyApp extends StatelessWidget {

@@ -751,6 +751,82 @@ CREATE TABLE maps (
     }
   }
 
+  Future<void> upsertMapInfo(MapInfo mapInfo) async {
+    if (kIsWeb) {
+      await init();
+      if (mapInfo.id == null) {
+        final created = await createMap(mapInfo);
+        if (created.id != null) {
+          await _mapBox!.put(created.id, created);
+        }
+      } else {
+        final stored = MapInfo(
+          id: mapInfo.id,
+          title: mapInfo.title,
+          imagePath: mapInfo.imagePath,
+        );
+        await _mapBox!.put(mapInfo.id, stored);
+      }
+    } else {
+      final db = await instance.database;
+      final data = Map<String, dynamic>.from(mapInfo.toMap());
+      await db.insert(
+        'maps',
+        data,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+  }
+
+  Future<void> replaceMemosForMap(int mapId, List<Memo> memos) async {
+    if (kIsWeb) {
+      await init();
+      final keysToDelete = <dynamic>[];
+      for (final entry in _memoBox!.toMap().entries) {
+        if (entry.value.mapId == mapId) {
+          keysToDelete.add(entry.key);
+        }
+      }
+      await _memoBox!.deleteAll(keysToDelete);
+
+      for (final memo in memos) {
+        memo.mapId = mapId;
+        if (memo.id != null) {
+          await _memoBox!.put(memo.id, memo);
+        } else {
+          final key = await _memoBox!.add(memo);
+          if (key is int) {
+            memo.id = key;
+          } else {
+            final parsed = int.tryParse(key.toString());
+            if (parsed != null) {
+              memo.id = parsed;
+            }
+          }
+        }
+      }
+    } else {
+      final db = await instance.database;
+      await db.delete('memos', where: 'mapId = ?', whereArgs: [mapId]);
+
+      for (final memo in memos) {
+        memo.mapId = mapId;
+        final data = Map<String, dynamic>.from(memo.toMap());
+        if (memo.id == null) {
+          data.remove('id');
+          final newId = await db.insert('memos', data);
+          memo.id = newId;
+        } else {
+          await db.insert(
+            'memos',
+            data,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+      }
+    }
+  }
+
   Future close() async {
     if (kIsWeb) {
       await _mapBox?.close();

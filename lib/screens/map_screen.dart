@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import '../models/memo.dart';
 import '../models/map_info.dart';
 import '../utils/database_helper.dart';
+import '../utils/firebase_map_service.dart';
 import '../utils/print_helper.dart';
 import '../utils/ai_service.dart';
 import '../widgets/custom_map_widget.dart';
@@ -31,6 +32,8 @@ class _MapScreenState extends State<MapScreen> {
   final GlobalKey<CustomMapWidgetState> _mapWidgetKey =
       GlobalKey<CustomMapWidgetState>();
   bool _isOCRProcessing = false; // OCR処理中フラグ
+  bool _isUploading = false;
+  bool _isDownloading = false;
   Box? _layerNameBox; // レイヤー名ボックス
 
   String _layerDisplayName(int layer) {
@@ -76,6 +79,207 @@ class _MapScreenState extends State<MapScreen> {
         await _layerNameBox!.put(_layerKey(_currentLayer), newName);
       }
       setState(() {});
+    }
+  }
+
+  Future<void> _uploadMapToFirebase() async {
+    if (_isUploading || _isDownloading) {
+      return;
+    }
+
+    MapInfo? targetMap = widget.mapInfo;
+    if (targetMap == null) {
+      int? mapId;
+      if (_customMapPath != null) {
+        mapId = await DatabaseHelper.instance.getOrCreateMapId(
+          _customMapPath,
+          widget.mapInfo?.title ?? 'カスタム地図',
+        );
+      }
+      if (mapId != null) {
+        try {
+          final maps = await DatabaseHelper.instance.readAllMaps();
+          targetMap = maps.firstWhere((map) => map.id == mapId);
+        } catch (_) {
+          targetMap = MapInfo(
+            id: mapId,
+            title: widget.mapInfo?.title ?? 'カスタム地図',
+            imagePath: _customMapPath,
+          );
+        }
+      }
+    }
+
+    if (targetMap == null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Firebaseに保存できる地図が見つかりませんでした'),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isUploading = true;
+    });
+
+    var dialogShown = false;
+
+    try {
+      if (mounted) {
+        dialogShown = true;
+        showDialog<Widget>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => const Center(
+            child: CircularProgressIndicator(),
+          ),
+        );
+      }
+
+      final result = await FirebaseMapService.instance.uploadMap(targetMap);
+
+      if (!mounted) {
+        return;
+      }
+
+      if (dialogShown) {
+        Navigator.of(context, rootNavigator: true).pop();
+        dialogShown = false;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.success
+                ? 'Firebaseに地図を保存しました'
+                : 'Firebaseへの保存に失敗しました: ${result.message}',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        if (dialogShown) {
+          Navigator.of(context, rootNavigator: true).pop();
+          dialogShown = false;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Firebaseアップロード中にエラーが発生しました: $error'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _downloadMapFromFirebase() async {
+    if (_isDownloading || _isUploading) {
+      return;
+    }
+
+    MapInfo? targetMap = widget.mapInfo;
+    int? currentMapId = targetMap?.id;
+    const fallbackTitle = 'Custom Map';
+
+    if (currentMapId == null) {
+      if (_customMapPath != null) {
+        currentMapId = await DatabaseHelper.instance.getOrCreateMapId(
+          _customMapPath,
+          widget.mapInfo?.title ?? fallbackTitle,
+        );
+      }
+    }
+
+    if (currentMapId == null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('Save the map locally before downloading it from Firebase.'),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isDownloading = true;
+    });
+
+    var dialogShown = false;
+
+    try {
+      if (mounted) {
+        dialogShown = true;
+        showDialog<Widget>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => const Center(
+            child: CircularProgressIndicator(),
+          ),
+        );
+      }
+
+      final result =
+          await FirebaseMapService.instance.downloadMap(currentMapId);
+
+      if (!mounted) {
+        return;
+      }
+
+      if (dialogShown) {
+        Navigator.of(context, rootNavigator: true).pop();
+        dialogShown = false;
+      }
+
+      if (result.success) {
+        await _loadMemos();
+        final maps = await DatabaseHelper.instance.readAllMaps();
+        MapInfo? updatedMap;
+        for (final map in maps) {
+          if (map.id == currentMapId) {
+            updatedMap = map;
+            break;
+          }
+        }
+        if (updatedMap != null) {
+          setState(() {
+            _customMapPath = updatedMap!.imagePath ?? _customMapPath;
+          });
+        }
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.message)),
+      );
+    } catch (error) {
+      if (mounted) {
+        if (dialogShown) {
+          Navigator.of(context, rootNavigator: true).pop();
+          dialogShown = false;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to download map from Firebase: $error'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDownloading = false;
+        });
+      }
     }
   }
 
@@ -635,6 +839,12 @@ class _MapScreenState extends State<MapScreen> {
             onSelected: (value) async {
               try {
                 switch (value) {
+                  case 'upload_map':
+                    await _uploadMapToFirebase();
+                    break;
+                  case 'download_map':
+                    await _downloadMapFromFirebase();
+                    break;
                   case 'print_map':
                     await PrintHelper.printMapImage(
                       _customMapPath,
@@ -694,6 +904,43 @@ class _MapScreenState extends State<MapScreen> {
               }
             },
             itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'upload_map',
+                enabled: !_isUploading && !_isDownloading,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.cloud_upload,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white
+                          : Colors.black,
+                    ),
+                    const SizedBox(width: 8),
+                    Text((_isUploading || _isDownloading)
+                        ? 'Syncing with Firebase...'
+                        : 'Upload to Firebase'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'download_map',
+                enabled: !_isUploading && !_isDownloading,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.cloud_download,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white
+                          : Colors.black,
+                    ),
+                    const SizedBox(width: 8),
+                    Text((_isUploading || _isDownloading)
+                        ? 'Syncing with Firebase...'
+                        : 'Download from Firebase'),
+                  ],
+                ),
+              ),
+              const PopupMenuDivider(),
               PopupMenuItem(
                 value: 'print_map',
                 child: Row(

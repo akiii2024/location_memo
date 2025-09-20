@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:convert';
 import '../models/map_info.dart';
 import '../utils/database_helper.dart';
+import '../utils/firebase_map_service.dart';
 import 'add_map_screen.dart';
 import 'map_screen.dart';
 
@@ -17,6 +18,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   List<MapInfo> _maps = [];
   bool _isLoading = true;
+  int? _syncingMapId;
 
   @override
   void initState() {
@@ -116,6 +118,151 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _uploadMapOnline(MapInfo mapInfo) async {
+    if (mapInfo.id == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Save the map locally before uploading to Firebase.'),
+        ),
+      );
+      return;
+    }
+
+    if (_syncingMapId == mapInfo.id) {
+      return;
+    }
+
+    setState(() {
+      _syncingMapId = mapInfo.id;
+    });
+
+    var dialogShown = false;
+
+    try {
+      if (mounted) {
+        dialogShown = true;
+        showDialog<Widget>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => const Center(
+            child: CircularProgressIndicator(),
+          ),
+        );
+      }
+
+      final result = await FirebaseMapService.instance.uploadMap(mapInfo);
+
+      if (!mounted) {
+        return;
+      }
+
+      if (dialogShown) {
+        Navigator.of(context, rootNavigator: true).pop();
+        dialogShown = false;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.success
+                ? 'Firebaseに地図を保存しました'
+                : 'Firebaseへの保存に失敗しました: ${result.message}',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        if (dialogShown) {
+          Navigator.of(context, rootNavigator: true).pop();
+          dialogShown = false;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Firebaseアップロード中にエラーが発生しました: $error'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _syncingMapId = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _downloadMapOnline(MapInfo mapInfo) async {
+    if (mapInfo.id == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('Save the map locally before downloading it from Firebase.'),
+        ),
+      );
+      return;
+    }
+
+    if (_syncingMapId == mapInfo.id) {
+      return;
+    }
+
+    setState(() {
+      _syncingMapId = mapInfo.id;
+    });
+
+    var dialogShown = false;
+
+    try {
+      if (mounted) {
+        dialogShown = true;
+        showDialog<Widget>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => const Center(
+            child: CircularProgressIndicator(),
+          ),
+        );
+      }
+
+      final result = await FirebaseMapService.instance.downloadMap(mapInfo.id!);
+
+      if (!mounted) {
+        return;
+      }
+
+      if (dialogShown) {
+        Navigator.of(context, rootNavigator: true).pop();
+        dialogShown = false;
+      }
+
+      if (result.success) {
+        await _loadMaps();
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.message)),
+      );
+    } catch (error) {
+      if (mounted) {
+        if (dialogShown) {
+          Navigator.of(context, rootNavigator: true).pop();
+          dialogShown = false;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to download map from Firebase: $error'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _syncingMapId = null;
+        });
+      }
+    }
+  }
+
   Future<void> _renameMap(MapInfo mapInfo) async {
     final TextEditingController controller =
         TextEditingController(text: mapInfo.title);
@@ -195,6 +342,28 @@ class _HomeScreenState extends State<HomeScreen> {
                 onTap: () {
                   Navigator.pop(context);
                   _openMap(mapInfo);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.cloud_upload),
+                title: Text(_syncingMapId == mapInfo.id
+                    ? 'Syncing with Firebase...'
+                    : 'Upload to Firebase'),
+                enabled: _syncingMapId != mapInfo.id && mapInfo.id != null,
+                onTap: () async {
+                  Navigator.pop(context);
+                  await _uploadMapOnline(mapInfo);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.cloud_download),
+                title: Text(_syncingMapId == mapInfo.id
+                    ? 'Syncing with Firebase...'
+                    : 'Download from Firebase'),
+                enabled: _syncingMapId != mapInfo.id && mapInfo.id != null,
+                onTap: () async {
+                  Navigator.pop(context);
+                  await _downloadMapOnline(mapInfo);
                 },
               ),
               ListTile(
