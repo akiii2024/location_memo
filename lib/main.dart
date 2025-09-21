@@ -1,10 +1,10 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
-import 'package:location_memo/screens/main_screen.dart';
 import 'package:location_memo/screens/splash_screen.dart';
 import 'package:location_memo/utils/theme_provider.dart';
+import 'package:location_memo/utils/offline_mode_provider.dart';
 import 'package:location_memo/utils/app_info.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
@@ -34,8 +34,15 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (context) => ThemeProvider(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => OfflineModeProvider()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        StreamProvider<User?>.value(
+          value: FirebaseAuth.instance.authStateChanges(),
+          initialData: FirebaseAuth.instance.currentUser,
+        ),
+      ],
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, child) {
           return MaterialApp(

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -27,6 +26,9 @@ class FirebaseRemoteMapSummary {
   final DateTime? updatedAt;
   final int memoCount;
   final String? imageUrl;
+  final String ownerId;
+  final String? ownerEmail;
+  final bool isShared;
 
   const FirebaseRemoteMapSummary({
     required this.mapId,
@@ -34,6 +36,9 @@ class FirebaseRemoteMapSummary {
     this.updatedAt,
     required this.memoCount,
     this.imageUrl,
+    required this.ownerId,
+    this.ownerEmail,
+    required this.isShared,
   });
 }
 
@@ -42,6 +47,25 @@ class FirebaseMapUploadResult {
   final String message;
 
   const FirebaseMapUploadResult({required this.success, required this.message});
+}
+
+class FirebaseMapShareResult {
+  final bool success;
+  final String message;
+
+  const FirebaseMapShareResult({required this.success, required this.message});
+}
+
+class FirebaseSharedUser {
+  final String uid;
+  final String email;
+  final String? displayName;
+
+  const FirebaseSharedUser({
+    required this.uid,
+    required this.email,
+    this.displayName,
+  });
 }
 
 class FirebaseMapService {
@@ -56,15 +80,17 @@ class FirebaseMapService {
   static int _memoIdFallbackCounter = 0;
 
   Future<List<FirebaseRemoteMapSummary>> fetchRemoteMaps() async {
-    final user = await _ensureSignedIn();
-    final snapshot = await _firestore
+    final user = _requireUser();
+
+    final summaries = <FirebaseRemoteMapSummary>[];
+
+    final ownSnapshot = await _firestore
         .collection('users')
         .doc(user.uid)
         .collection('maps')
         .get();
 
-    final summaries = <FirebaseRemoteMapSummary>[];
-    for (final doc in snapshot.docs) {
+    for (final doc in ownSnapshot.docs) {
       final data = doc.data();
       final parsedId = int.tryParse(doc.id);
       final mapId =
@@ -72,12 +98,45 @@ class FirebaseMapService {
       if (mapId == null) {
         continue;
       }
-      DateTime? updatedAt;
-      final updatedRaw = data['updatedAt'];
-      if (updatedRaw is Timestamp) {
-        updatedAt = updatedRaw.toDate();
-      } else if (updatedRaw is DateTime) {
-        updatedAt = updatedRaw;
+      final updatedAt = _parseTimestamp(data['updatedAt']);
+      final ownerEmail = data['ownerEmail']?.toString() ?? user.email;
+      summaries.add(
+        FirebaseRemoteMapSummary(
+          mapId: mapId,
+          title: data['title']?.toString() ?? 'Untitled map',
+          updatedAt: updatedAt,
+          memoCount: (data['memoCount'] as num?)?.toInt() ?? 0,
+          imageUrl: data['imageUrl']?.toString(),
+          ownerId: user.uid,
+          ownerEmail: ownerEmail,
+          isShared: false,
+        ),
+      );
+    }
+
+    final sharedSnapshot = await _firestore
+        .collectionGroup('maps')
+        .where('sharedWith', arrayContains: user.uid)
+        .get();
+
+    for (final doc in sharedSnapshot.docs) {
+      final data = doc.data();
+      final parsedId = int.tryParse(doc.id);
+      final mapId =
+          parsedId ?? (data['id'] is num ? (data['id'] as num).toInt() : null);
+      if (mapId == null) {
+        continue;
+      }
+      final ownerId =
+          data['ownerId']?.toString() ?? doc.reference.parent.parent?.id;
+      if (ownerId == null || ownerId == user.uid) {
+        continue;
+      }
+      final updatedAt = _parseTimestamp(data['updatedAt']);
+      var ownerEmail = data['ownerEmail']?.toString();
+      if (ownerEmail == null || ownerEmail.isEmpty) {
+        final profile = await _fetchUserProfile(ownerId);
+        ownerEmail = profile?.email;
       }
       summaries.add(
         FirebaseRemoteMapSummary(
@@ -86,18 +145,34 @@ class FirebaseMapService {
           updatedAt: updatedAt,
           memoCount: (data['memoCount'] as num?)?.toInt() ?? 0,
           imageUrl: data['imageUrl']?.toString(),
+          ownerId: ownerId,
+          ownerEmail: ownerEmail,
+          isShared: true,
         ),
       );
     }
+
+    summaries.sort((a, b) {
+      final aTime = a.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bTime = b.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return bTime.compareTo(aTime);
+    });
+
     return summaries;
   }
 
-  Future<FirebaseMapDownloadResult> downloadMap(int mapId) async {
+  Future<FirebaseMapDownloadResult> downloadMap(
+    int mapId, {
+    String? ownerUid,
+    bool importAsCopy = false,
+  }) async {
     try {
-      final user = await _ensureSignedIn();
+      final user = _requireUser();
+      final targetOwnerId = ownerUid ?? user.uid;
+
       final docRef = _firestore
           .collection('users')
-          .doc(user.uid)
+          .doc(targetOwnerId)
           .collection('maps')
           .doc(mapId.toString());
       final doc = await docRef.get();
@@ -110,12 +185,24 @@ class FirebaseMapService {
       }
 
       final data = doc.data()!;
-      final existingMaps = await DatabaseHelper.instance.readAllMaps();
+      if (targetOwnerId != user.uid) {
+        final sharedWith = _parseStringSet(data['sharedWith']);
+        if (!sharedWith.contains(user.uid)) {
+          return const FirebaseMapDownloadResult(
+            success: false,
+            message: 'You do not have permission to download this map.',
+          );
+        }
+      }
+
       MapInfo? existingMap;
-      for (final map in existingMaps) {
-        if (map.id == mapId) {
-          existingMap = map;
-          break;
+      if (!importAsCopy) {
+        final existingMaps = await DatabaseHelper.instance.readAllMaps();
+        for (final map in existingMaps) {
+          if (map.id == mapId) {
+            existingMap = map;
+            break;
+          }
         }
       }
 
@@ -223,6 +310,29 @@ class FirebaseMapService {
         title: data['title']?.toString() ?? 'Untitled map',
         imagePath: imagePath,
       );
+
+      if (importAsCopy) {
+        final createdMap = await DatabaseHelper.instance.createMap(
+          MapInfo(title: mapInfo.title, imagePath: mapInfo.imagePath),
+        );
+        final newMapId = createdMap.id;
+        if (newMapId == null) {
+          return const FirebaseMapDownloadResult(
+            success: false,
+            message: 'インポートに失敗しました: map id が生成されませんでした。',
+          );
+        }
+        for (final memo in memos) {
+          memo.id = null;
+          memo.mapId = newMapId;
+        }
+        await DatabaseHelper.instance.replaceMemosForMap(newMapId, memos);
+        return const FirebaseMapDownloadResult(
+          success: true,
+          message: '共有地図をインポートしました。',
+        );
+      }
+
       await DatabaseHelper.instance.upsertMapInfo(mapInfo);
       await DatabaseHelper.instance.replaceMemosForMap(mapId, memos);
 
@@ -249,7 +359,7 @@ class FirebaseMapService {
     }
 
     try {
-      final user = await _ensureSignedIn();
+      final user = _requireUser();
       final memos = await DatabaseHelper.instance.readMemosByMapId(mapInfo.id!);
 
       final docRef = _firestore
@@ -280,6 +390,8 @@ class FirebaseMapService {
         'imageUrl': imageUrl,
         'updatedAt': FieldValue.serverTimestamp(),
         'memoCount': memos.length,
+        'ownerId': user.uid,
+        'ownerEmail': user.email,
       }, SetOptions(merge: true));
 
       await _replaceMemoDocuments(docRef, mapInfo, memos, user.uid);
@@ -298,18 +410,229 @@ class FirebaseMapService {
     }
   }
 
-  Future<User> _ensureSignedIn() async {
-    final current = _auth.currentUser;
-    if (current != null) {
-      return current;
+  Future<FirebaseMapShareResult> shareMapWithEmail({
+    required int mapId,
+    required String email,
+  }) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail.isEmpty) {
+      return const FirebaseMapShareResult(
+        success: false,
+        message: '共有するメールアドレスを入力してください。',
+      );
     }
 
-    final credential = await _auth.signInAnonymously();
-    final user = credential.user;
-    if (user == null) {
-      throw StateError('Anonymous authentication failed.');
+    try {
+      final user = _requireUser();
+      final profile = await _findUserProfileByEmail(normalizedEmail);
+      if (profile == null) {
+        return FirebaseMapShareResult(
+          success: false,
+          message: '指定されたメールアドレスのユーザーが見つかりません。',
+        );
+      }
+      if (profile.uid == user.uid) {
+        return const FirebaseMapShareResult(
+          success: false,
+          message: '自分自身には共有できません。',
+        );
+      }
+
+      final docRef = _firestore
+          .collection('users')
+          .doc(user.uid)
+          .collection('maps')
+          .doc(mapId.toString());
+      final doc = await docRef.get();
+      if (!doc.exists) {
+        return const FirebaseMapShareResult(
+          success: false,
+          message: '共有する地図が見つかりませんでした。',
+        );
+      }
+
+      await docRef.set({
+        'sharedWith': FieldValue.arrayUnion([profile.uid]),
+        'sharedUpdatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      return FirebaseMapShareResult(
+        success: true,
+        message: '${profile.email} と共有しました。',
+      );
+    } catch (error, stackTrace) {
+      debugPrint('Firebase share failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      return FirebaseMapShareResult(
+        success: false,
+        message: '共有に失敗しました: $error',
+      );
     }
-    return user;
+  }
+
+  Future<FirebaseMapShareResult> revokeSharedUser({
+    required int mapId,
+    required String uid,
+  }) async {
+    if (uid.isEmpty) {
+      return const FirebaseMapShareResult(
+        success: false,
+        message: '削除する共有ユーザーが指定されていません。',
+      );
+    }
+
+    try {
+      final user = _requireUser();
+      final docRef = _firestore
+          .collection('users')
+          .doc(user.uid)
+          .collection('maps')
+          .doc(mapId.toString());
+      final doc = await docRef.get();
+      if (!doc.exists) {
+        return const FirebaseMapShareResult(
+          success: false,
+          message: '共有情報が見つかりませんでした。',
+        );
+      }
+
+      await docRef.set({
+        'sharedWith': FieldValue.arrayRemove([uid]),
+        'sharedUpdatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      return const FirebaseMapShareResult(
+        success: true,
+        message: '共有設定を更新しました。',
+      );
+    } catch (error, stackTrace) {
+      debugPrint('Firebase revoke share failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      return FirebaseMapShareResult(
+        success: false,
+        message: '共有の解除に失敗しました: $error',
+      );
+    }
+  }
+
+  Future<List<FirebaseSharedUser>> fetchSharedUsers(int mapId) async {
+    try {
+      final user = _requireUser();
+      final docRef = _firestore
+          .collection('users')
+          .doc(user.uid)
+          .collection('maps')
+          .doc(mapId.toString());
+      final doc = await docRef.get();
+      if (!doc.exists) {
+        return const <FirebaseSharedUser>[];
+      }
+
+      final sharedWith = _parseStringSet(doc.data()?['sharedWith']);
+      if (sharedWith.isEmpty) {
+        return const <FirebaseSharedUser>[];
+      }
+
+      final profiles = <FirebaseSharedUser>[];
+      for (final sharedUid in sharedWith) {
+        final profile = await _fetchUserProfile(sharedUid);
+        if (profile != null) {
+          profiles.add(profile);
+        }
+      }
+
+      profiles.sort((a, b) => a.email.compareTo(b.email));
+      return profiles;
+    } catch (error, stackTrace) {
+      debugPrint('Firebase fetch shared users failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      return const <FirebaseSharedUser>[];
+    }
+  }
+
+  Future<FirebaseSharedUser?> _findUserProfileByEmail(String email) async {
+    final normalized = email.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return null;
+    }
+
+    QuerySnapshot<Map<String, dynamic>> snapshot = await _firestore
+        .collection('userProfiles')
+        .where('emailLower', isEqualTo: normalized)
+        .limit(1)
+        .get();
+
+    if (snapshot.docs.isEmpty) {
+      snapshot = await _firestore
+          .collection('userProfiles')
+          .where('email', isEqualTo: email)
+          .limit(1)
+          .get();
+    }
+
+    if (snapshot.docs.isEmpty) {
+      return null;
+    }
+
+    final doc = snapshot.docs.first;
+    final data = doc.data();
+    return FirebaseSharedUser(
+      uid: doc.id,
+      email: data['email']?.toString() ?? normalized,
+      displayName: data['displayName']?.toString(),
+    );
+  }
+
+  Future<FirebaseSharedUser?> _fetchUserProfile(String uid) async {
+    try {
+      final doc = await _firestore.collection('userProfiles').doc(uid).get();
+      if (!doc.exists) {
+        return null;
+      }
+      final data = doc.data();
+      if (data == null) {
+        return null;
+      }
+      return FirebaseSharedUser(
+        uid: doc.id,
+        email: data['email']?.toString() ?? '',
+        displayName: data['displayName']?.toString(),
+      );
+    } catch (error) {
+      debugPrint('Firebase fetch user profile failed: $error');
+      return null;
+    }
+  }
+
+  Set<String> _parseStringSet(dynamic value) {
+    if (value is Iterable) {
+      return value.map((e) => e.toString()).toSet();
+    }
+    return <String>{};
+  }
+
+  DateTime? _parseTimestamp(dynamic value) {
+    if (value is Timestamp) {
+      return value.toDate();
+    }
+    if (value is DateTime) {
+      return value;
+    }
+    if (value is int) {
+      return DateTime.fromMillisecondsSinceEpoch(value);
+    }
+    if (value is num) {
+      return DateTime.fromMillisecondsSinceEpoch(value.toInt());
+    }
+    return null;
+  }
+
+  User _requireUser() {
+    final current = _auth.currentUser;
+    if (current == null) {
+      throw StateError('User not authenticated.');
+    }
+    return current;
   }
 
   Future<void> _replaceMemoDocuments(

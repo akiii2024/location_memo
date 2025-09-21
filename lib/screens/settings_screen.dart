@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'map_list_screen.dart';
 import 'tutorial_screen.dart';
+import 'auth_screen.dart';
 import 'about_app_screen.dart';
 import '../utils/theme_provider.dart';
 import '../utils/app_info.dart';
@@ -10,6 +12,7 @@ import '../utils/ai_service.dart';
 import '../utils/backup_service.dart';
 import '../utils/database_helper.dart';
 import '../utils/default_values.dart';
+import 'package:location_memo/utils/offline_mode_provider.dart';
 import '../models/map_info.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
@@ -26,6 +29,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isRestoring = false;
   bool _isMapBackingUp = false;
   bool _isMapRestoring = false;
+  bool _isSigningOut = false;
   BackupInfo? _backupInfo;
   List<MapInfo> _maps = [];
 
@@ -51,6 +55,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _maps = maps;
       });
+    }
+  }
+
+  Future<void> _signOut() async {
+    if (_isSigningOut) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('ログアウト'),
+        content: const Text('現在のアカウントからログアウトしますか？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('キャンセル'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('ログアウト'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    setState(() {
+      _isSigningOut = true;
+    });
+
+    try {
+      await FirebaseAuth.instance.signOut();
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const AuthScreen()),
+        (route) => false,
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('ログアウトに失敗しました: $error')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSigningOut = false;
+        });
+      }
     }
   }
 
@@ -1075,6 +1135,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       themeProvider.setDarkMode(value);
                     },
                   ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 8),
+          Card(
+            elevation: 2,
+            child: ListTile(
+              leading: const Icon(Icons.logout, color: Colors.redAccent),
+              title: const Text('ログアウト'),
+              subtitle: Text(
+                  FirebaseAuth.instance.currentUser?.email ?? 'ログイン状態ではありません'),
+              trailing: _isSigningOut
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.arrow_forward_ios, size: 16),
+              enabled:
+                  !_isSigningOut && FirebaseAuth.instance.currentUser != null,
+              onTap: FirebaseAuth.instance.currentUser == null || _isSigningOut
+                  ? null
+                  : _signOut,
+            ),
+          ),
+          Consumer<OfflineModeProvider>(
+            builder: (context, offlineModeProvider, _) {
+              if (!offlineModeProvider.isOfflineMode) {
+                return const SizedBox.shrink();
+              }
+              return Card(
+                elevation: 2,
+                child: ListTile(
+                  leading:
+                      const Icon(Icons.cloud_off, color: Colors.orangeAccent),
+                  title: const Text('オフラインモードで利用中'),
+                  subtitle: const Text('オンライン機能を利用するにはログインしてください'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: () async {
+                    await offlineModeProvider.disableOfflineMode();
+                    if (!mounted) {
+                      return;
+                    }
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const AuthScreen()),
+                    );
+                  },
                 ),
               );
             },

@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:location_memo/screens/auth_screen.dart';
 import 'package:location_memo/screens/main_screen.dart';
 import 'package:location_memo/screens/tutorial_screen.dart';
 import 'package:location_memo/utils/app_info.dart';
 import 'package:location_memo/utils/tutorial_service.dart';
+import 'package:location_memo/utils/offline_mode_provider.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({Key? key}) : super(key: key);
@@ -33,17 +37,32 @@ class _SplashScreenState extends State<SplashScreen>
 
     _animationController.forward();
 
-    // 3秒後に初回起動判定を行って画面遷移
     Future.delayed(const Duration(seconds: 3), () async {
-      if (mounted) {
-        final isFirstLaunch = await TutorialService.isFirstLaunch();
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) =>
-                isFirstLaunch ? const TutorialScreen() : const MainScreen(),
-          ),
-        );
+      if (!mounted) {
+        return;
       }
+
+      final offlineModeProvider = context.read<OfflineModeProvider>();
+      await offlineModeProvider.ensureInitialized();
+
+      final isFirstLaunch = await TutorialService.isFirstLaunch();
+      final user = FirebaseAuth.instance.currentUser;
+      if (!mounted) {
+        return;
+      }
+
+      Widget nextScreen;
+      if (isFirstLaunch) {
+        nextScreen = const TutorialScreen();
+      } else if (user == null && !offlineModeProvider.isOfflineMode) {
+        nextScreen = const AuthScreen();
+      } else {
+        nextScreen = const MainScreen();
+      }
+
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => nextScreen),
+      );
     });
   }
 
@@ -63,7 +82,6 @@ class _SplashScreenState extends State<SplashScreen>
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // アプリアイコン
               Container(
                 width: 120,
                 height: 120,
@@ -89,7 +107,6 @@ class _SplashScreenState extends State<SplashScreen>
                 ),
               ),
               const SizedBox(height: 30),
-              // アプリ名
               Text(
                 'Location Memo',
                 style: TextStyle(
@@ -100,7 +117,6 @@ class _SplashScreenState extends State<SplashScreen>
                 ),
               ),
               const SizedBox(height: 10),
-              // バージョン番号
               Text(
                 AppInfo.version,
                 style: TextStyle(
@@ -109,7 +125,6 @@ class _SplashScreenState extends State<SplashScreen>
                 ),
               ),
               const SizedBox(height: 10),
-              // サブタイトル
               Text(
                 'Powered by Flutter',
                 style: TextStyle(
@@ -123,7 +138,6 @@ class _SplashScreenState extends State<SplashScreen>
                 ),
               ),
               const SizedBox(height: 50),
-              // ローディングインジケーター
               SizedBox(
                 width: 30,
                 height: 30,

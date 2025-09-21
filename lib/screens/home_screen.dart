@@ -1,16 +1,19 @@
-import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
-import 'dart:io';
 import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:provider/provider.dart';
+import 'package:location_memo/utils/offline_mode_provider.dart';
 import '../models/map_info.dart';
 import '../utils/database_helper.dart';
 import '../utils/firebase_map_service.dart';
 import 'add_map_screen.dart';
+import 'auth_screen.dart';
 import 'map_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
-
   @override
   _HomeScreenState createState() => _HomeScreenState();
 }
@@ -19,7 +22,6 @@ class _HomeScreenState extends State<HomeScreen> {
   List<MapInfo> _maps = [];
   bool _isLoading = true;
   int? _syncingMapId;
-
   @override
   void initState() {
     super.initState();
@@ -30,7 +32,6 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isLoading = true;
     });
-
     try {
       final maps = await DatabaseHelper.instance.readAllMaps();
       setState(() {
@@ -45,6 +46,33 @@ class _HomeScreenState extends State<HomeScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  Future<bool> _ensureLoggedIn() async {
+    if (FirebaseAuth.instance.currentUser != null) {
+      return true;
+    }
+    if (!mounted) {
+      return false;
+    }
+    final offlineModeProvider = context.read<OfflineModeProvider>();
+    if (offlineModeProvider.isOfflineMode) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('オフラインモードでは利用できません。設定からオンラインモードに切り替えてください'),
+        ),
+      );
+      return false;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('オンライン機能を利用するにはログインしてください'),
+      ),
+    );
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const AuthScreen()),
+    );
+    return FirebaseAuth.instance.currentUser != null;
   }
 
   void _openMap(MapInfo mapInfo) {
@@ -92,11 +120,9 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       },
     );
-
     if (confirmed == true) {
       try {
         await DatabaseHelper.instance.deleteMap(mapInfo.id!);
-
         // 地図ファイルも削除
         if (mapInfo.imagePath != null) {
           final file = File(mapInfo.imagePath!);
@@ -104,11 +130,9 @@ class _HomeScreenState extends State<HomeScreen> {
             await file.delete();
           }
         }
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('「${mapInfo.title}」を削除しました')),
         );
-
         _loadMaps(); // 地図リストを再読み込み
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -119,6 +143,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _uploadMapOnline(MapInfo mapInfo) async {
+    if (!await _ensureLoggedIn()) {
+      return;
+    }
     if (mapInfo.id == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -127,17 +154,13 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       return;
     }
-
     if (_syncingMapId == mapInfo.id) {
       return;
     }
-
     setState(() {
       _syncingMapId = mapInfo.id;
     });
-
     var dialogShown = false;
-
     try {
       if (mounted) {
         dialogShown = true;
@@ -149,18 +172,14 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       }
-
       final result = await FirebaseMapService.instance.uploadMap(mapInfo);
-
       if (!mounted) {
         return;
       }
-
       if (dialogShown) {
         Navigator.of(context, rootNavigator: true).pop();
         dialogShown = false;
       }
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -192,6 +211,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _downloadMapOnline(MapInfo mapInfo) async {
+    if (!await _ensureLoggedIn()) {
+      return;
+    }
     if (mapInfo.id == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -201,17 +223,13 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       return;
     }
-
     if (_syncingMapId == mapInfo.id) {
       return;
     }
-
     setState(() {
       _syncingMapId = mapInfo.id;
     });
-
     var dialogShown = false;
-
     try {
       if (mounted) {
         dialogShown = true;
@@ -223,22 +241,17 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       }
-
       final result = await FirebaseMapService.instance.downloadMap(mapInfo.id!);
-
       if (!mounted) {
         return;
       }
-
       if (dialogShown) {
         Navigator.of(context, rootNavigator: true).pop();
         dialogShown = false;
       }
-
       if (result.success) {
         await _loadMaps();
       }
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(result.message)),
       );
@@ -266,7 +279,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _renameMap(MapInfo mapInfo) async {
     final TextEditingController controller =
         TextEditingController(text: mapInfo.title);
-
     final result = await showDialog<String>(
       context: context,
       builder: (BuildContext context) {
@@ -303,7 +315,6 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       },
     );
-
     if (result != null && result.isNotEmpty && result != mapInfo.title) {
       try {
         final updatedMap = MapInfo(
@@ -311,13 +322,10 @@ class _HomeScreenState extends State<HomeScreen> {
           title: result,
           imagePath: mapInfo.imagePath,
         );
-
         await DatabaseHelper.instance.updateMap(updatedMap);
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('地図の名称を「$result」に変更しました')),
         );
-
         _loadMaps(); // 地図リストを再読み込み
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -325,6 +333,396 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       }
     }
+  }
+
+  Future<void> _showShareDialog(MapInfo mapInfo) async {
+    if (mapInfo.id == null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('共有する前に地図を保存してください。'),
+        ),
+      );
+      return;
+    }
+    if (!await _ensureLoggedIn()) {
+      return;
+    }
+    final emailController = TextEditingController();
+    var isLoading = true;
+    var isMutating = false;
+    List<FirebaseSharedUser> sharedUsers = const [];
+    String? loadError;
+    Future<void> loadSharedUsers() async {
+      try {
+        final users =
+            await FirebaseMapService.instance.fetchSharedUsers(mapInfo.id!);
+        sharedUsers = users;
+        loadError = null;
+      } catch (error) {
+        loadError = '共有情報の取得に失敗しました: $error';
+      }
+      isLoading = false;
+    }
+
+    await loadSharedUsers();
+    if (!mounted) {
+      emailController.dispose();
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setState) {
+            Future<void> refreshSharedUsers() async {
+              setState(() {
+                isLoading = true;
+              });
+              await loadSharedUsers();
+              if (mounted) {
+                setState(() {
+                  isLoading = false;
+                });
+              }
+            }
+
+            Future<void> handleShare() async {
+              final email = emailController.text.trim();
+              if (email.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('共有する相手のメールアドレスを入力してください。'),
+                  ),
+                );
+                return;
+              }
+              setState(() {
+                isMutating = true;
+              });
+              final result =
+                  await FirebaseMapService.instance.shareMapWithEmail(
+                mapId: mapInfo.id!,
+                email: email,
+              );
+              if (!mounted) {
+                return;
+              }
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(result.message)),
+              );
+              if (result.success) {
+                emailController.clear();
+                await refreshSharedUsers();
+              }
+              if (mounted) {
+                setState(() {
+                  isMutating = false;
+                });
+              }
+            }
+
+            Future<void> handleRevoke(String uid) async {
+              setState(() {
+                isMutating = true;
+              });
+              final result = await FirebaseMapService.instance
+                  .revokeSharedUser(mapId: mapInfo.id!, uid: uid);
+              if (!mounted) {
+                return;
+              }
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(result.message)),
+              );
+              if (result.success) {
+                await refreshSharedUsers();
+              }
+              if (mounted) {
+                setState(() {
+                  isMutating = false;
+                });
+              }
+            }
+
+            return AlertDialog(
+              title: Text('共有設定 (${mapInfo.title})'),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      controller: emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: const InputDecoration(
+                        labelText: 'メールアドレス',
+                        hintText: 'example@example.com',
+                      ),
+                      enabled: !isMutating,
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton.icon(
+                      onPressed: isMutating ? null : handleShare,
+                      icon: const Icon(Icons.person_add_alt_1),
+                      label: const Text('共有ユーザーを追加'),
+                    ),
+                    const SizedBox(height: 16),
+                    if (isLoading)
+                      const Center(child: CircularProgressIndicator())
+                    else if (loadError != null)
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            loadError!,
+                            style: const TextStyle(color: Colors.red),
+                          ),
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: () async {
+                                await refreshSharedUsers();
+                              },
+                              child: const Text('再試行'),
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      SizedBox(
+                        height: 220,
+                        child: sharedUsers.isEmpty
+                            ? const Center(
+                                child: Text('共有中のユーザーはいません。'),
+                              )
+                            : ListView.builder(
+                                itemCount: sharedUsers.length,
+                                itemBuilder: (context, index) {
+                                  final user = sharedUsers[index];
+                                  return ListTile(
+                                    leading: const Icon(Icons.person_outline),
+                                    title: Text(user.email),
+                                    subtitle: user.displayName != null &&
+                                            user.displayName!.isNotEmpty
+                                        ? Text(user.displayName!)
+                                        : null,
+                                    trailing: IconButton(
+                                      icon: const Icon(Icons.close),
+                                      onPressed: isMutating
+                                          ? null
+                                          : () async {
+                                              await handleRevoke(user.uid);
+                                            },
+                                      tooltip: '共有を解除',
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                  },
+                  child: const Text('閉じる'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    emailController.dispose();
+  }
+
+  Future<void> _showRemoteMapsDialog() async {
+    if (!await _ensureLoggedIn()) {
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    var future = FirebaseMapService.instance.fetchRemoteMaps();
+    String? activeKey;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setState) {
+            return AlertDialog(
+              title: const Text('オンライン地図'),
+              content: SizedBox(
+                width: 420,
+                child: FutureBuilder<List<FirebaseRemoteMapSummary>>(
+                  future: future,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snapshot.hasError) {
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            '地図の取得に失敗しました: ${snapshot.error}',
+                            style: const TextStyle(color: Colors.red),
+                          ),
+                          const SizedBox(height: 12),
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                future = FirebaseMapService.instance
+                                    .fetchRemoteMaps();
+                              });
+                            },
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('再試行'),
+                          ),
+                        ],
+                      );
+                    }
+                    final summaries =
+                        snapshot.data ?? const <FirebaseRemoteMapSummary>[];
+                    if (summaries.isEmpty) {
+                      return const SizedBox(
+                        height: 200,
+                        child: Center(
+                          child: Text('オンラインに保存された地図はありません。'),
+                        ),
+                      );
+                    }
+                    return SizedBox(
+                      height: 320,
+                      child: ListView.builder(
+                        itemCount: summaries.length,
+                        itemBuilder: (context, index) {
+                          final summary = summaries[index];
+                          final ownerLabel = summary.isShared
+                              ? '共有元: ${summary.ownerEmail ?? summary.ownerId}'
+                              : '所有者: ${summary.ownerEmail ?? '自分'}';
+                          final updatedLabel =
+                              '最終更新: ${_formatDateTime(summary.updatedAt)}';
+                          final memoLabel = 'メモ数: ${summary.memoCount}';
+                          final key =
+                              '${summary.ownerId}_${summary.mapId}_${summary.isShared}';
+                          final isProcessing = activeKey == key;
+                          final buttonLabel =
+                              summary.isShared ? 'インポート' : 'ダウンロード';
+                          return Card(
+                            margin: const EdgeInsets.symmetric(vertical: 6),
+                            child: ListTile(
+                              title: Text(summary.title),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(ownerLabel),
+                                  Text(memoLabel),
+                                  Text(updatedLabel),
+                                ],
+                              ),
+                              trailing: TextButton(
+                                onPressed: isProcessing
+                                    ? null
+                                    : () async {
+                                        setState(() {
+                                          activeKey = key;
+                                        });
+                                        await _handleRemoteDownload(
+                                          summary,
+                                          asImport: summary.isShared,
+                                        );
+                                        if (mounted) {
+                                          setState(() {
+                                            activeKey = null;
+                                          });
+                                        }
+                                      },
+                                child: isProcessing
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2),
+                                      )
+                                    : Text(buttonLabel),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      future = FirebaseMapService.instance.fetchRemoteMaps();
+                    });
+                  },
+                  child: const Text('再読み込み'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('閉じる'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _handleRemoteDownload(
+    FirebaseRemoteMapSummary summary, {
+    required bool asImport,
+  }) async {
+    try {
+      final result = await FirebaseMapService.instance.downloadMap(
+        summary.mapId,
+        ownerUid: summary.ownerId,
+        importAsCopy: asImport,
+      );
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.message)),
+      );
+      if (result.success) {
+        await _loadMaps();
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('ダウンロードに失敗しました: $error')),
+      );
+    }
+  }
+
+  String _formatDateTime(DateTime? value) {
+    if (value == null) {
+      return '不明';
+    }
+    final local = value.toLocal();
+    String twoDigits(int v) => v.toString().padLeft(2, '0');
+    final date =
+        '${local.year}/${twoDigits(local.month)}/${twoDigits(local.day)}';
+    final time = '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
+    return '$date $time';
   }
 
   void _showMapOptions(MapInfo mapInfo) {
@@ -367,6 +765,15 @@ class _HomeScreenState extends State<HomeScreen> {
                 },
               ),
               ListTile(
+                leading: const Icon(Icons.share),
+                title: const Text('共有設定'),
+                enabled: mapInfo.id != null,
+                onTap: () async {
+                  Navigator.pop(context);
+                  await _showShareDialog(mapInfo);
+                },
+              ),
+              ListTile(
                 leading: const Icon(Icons.edit),
                 title: const Text('名称を変更'),
                 onTap: () async {
@@ -395,6 +802,11 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('フィールドワーク記録'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.cloud),
+            tooltip: 'オンライン地図',
+            onPressed: _showRemoteMapsDialog,
+          ),
           IconButton(
             icon: const Icon(Icons.add),
             tooltip: '新しい地図を追加',

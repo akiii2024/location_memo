@@ -1,6 +1,10 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:location_memo/screens/auth_screen.dart';
 import 'package:location_memo/screens/main_screen.dart';
 import 'package:location_memo/utils/tutorial_service.dart';
+import 'package:location_memo/utils/offline_mode_provider.dart';
 
 class TutorialScreen extends StatefulWidget {
   const TutorialScreen({Key? key}) : super(key: key);
@@ -37,11 +41,24 @@ class _TutorialScreenState extends State<TutorialScreen> {
 
   void _completeTutorial() async {
     await TutorialService.setTutorialCompleted();
-    if (mounted) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const MainScreen()),
-      );
+    if (!mounted) {
+      return;
     }
+
+    final offlineModeProvider = context.read<OfflineModeProvider>();
+    await offlineModeProvider.ensureInitialized();
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (!mounted) {
+      return;
+    }
+
+    final nextScreen = user == null && !offlineModeProvider.isOfflineMode
+        ? const AuthScreen()
+        : const MainScreen();
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (context) => nextScreen),
+    );
   }
 
   @override
@@ -53,7 +70,6 @@ class _TutorialScreenState extends State<TutorialScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // スキップボタン
             Align(
               alignment: Alignment.topRight,
               child: Padding(
@@ -73,8 +89,6 @@ class _TutorialScreenState extends State<TutorialScreen> {
                 ),
               ),
             ),
-
-            // ページビュー
             Expanded(
               child: PageView.builder(
                 controller: _pageController,
@@ -89,13 +103,10 @@ class _TutorialScreenState extends State<TutorialScreen> {
                 },
               ),
             ),
-
-            // インジケーターとボタン
             Padding(
               padding: const EdgeInsets.all(20.0),
               child: Column(
                 children: [
-                  // ページインジケーター
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: List.generate(_totalPages, (index) {
@@ -116,8 +127,6 @@ class _TutorialScreenState extends State<TutorialScreen> {
                     }),
                   ),
                   const SizedBox(height: 20),
-
-                  // 次へ / 開始ボタン
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -126,17 +135,12 @@ class _TutorialScreenState extends State<TutorialScreen> {
                         backgroundColor: theme.primaryColor,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        elevation: theme.brightness == Brightness.dark ? 4 : 2,
                       ),
                       child: Text(
                         _currentPage == _totalPages - 1 ? 'はじめる' : '次へ',
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: Colors.white,
                         ),
                       ),
                     ),
@@ -157,24 +161,24 @@ class _TutorialScreenState extends State<TutorialScreen> {
       case 0:
         return _buildPageContent(
           icon: Icons.map_outlined,
-          title: 'Location Memo へようこそ',
-          description: 'フィールドワークでの記録を\n効率的に管理できるアプリです',
-          details: '地図上に位置情報と一緒にメモを記録し、\n後で簡単に確認・印刷することができます。',
+          title: 'フィールドワークを記録',
+          description: '地図上にピンを置いて\n調査結果を残せます。',
+          details: '調査地点や観察内容を位置情報と共に\n記録し、まとめて管理できます。',
           theme: theme,
         );
       case 1:
         return _buildPageContent(
-          icon: Icons.add_photo_alternate_outlined,
-          title: '地図を追加',
-          description: '調査エリアの地図画像を\nアプリに取り込めます',
-          details: 'ホーム画面の「+」ボタンから\n地図画像を選択して追加してください。',
+          icon: Icons.pin_drop_outlined,
+          title: 'カスタム地図を追加',
+          description: '任意の背景地図に\nピンを配置できます。',
+          details: '自分で用意した地図画像を読み込んで、\nピンで情報を整理しましょう。',
           theme: theme,
         );
       case 2:
         return _buildPageContent(
           icon: Icons.location_on_outlined,
           title: 'メモを記録',
-          description: '地図上の任意の位置に\nメモを保存できます',
+          description: '地図上の任意の位置に\nメモを保存できます。',
           details: '地図をタップすると、その場所に\n日時、テキスト、写真付きのメモを記録できます。',
           theme: theme,
         );
@@ -182,7 +186,7 @@ class _TutorialScreenState extends State<TutorialScreen> {
         return _buildPageContent(
           icon: Icons.print_outlined,
           title: '印刷・PDF出力',
-          description: 'フィールドワークの成果を\n印刷やPDF保存できます',
+          description: 'フィールドワークの成果を\n印刷やPDF保存できます。',
           details: '地図画面の印刷メニューから\nピン付き地図やメモ一覧を出力できます。',
           theme: theme,
         );
@@ -190,15 +194,15 @@ class _TutorialScreenState extends State<TutorialScreen> {
         return _buildPageContent(
           icon: Icons.psychology_outlined,
           title: 'AI機能搭載',
-          description: '最新のAI技術で\nメモ作成をサポート',
-          details: 'AIがメモの内容を分析し、\n効率的な記録作成をお手伝いします。\nフィールドワークの質を向上させましょう！',
+          description: '最新のAI技術で\nメモ作成をサポート。',
+          details: 'AIがメモの内容を分析し、\n効率的な記録作成をお手伝いします。',
           theme: theme,
         );
       case 5:
         return _buildPageContent(
           icon: Icons.explore_outlined,
           title: '記録を活用',
-          description: 'すべての準備が完了しました！',
+          description: 'すべての準備が整いました！',
           details: 'メモの検索や設定変更も可能です。\nAI機能と共に効率的なフィールドワーク記録を始めましょう。',
           theme: theme,
         );
@@ -214,7 +218,6 @@ class _TutorialScreenState extends State<TutorialScreen> {
     required String details,
     required ThemeData theme,
   }) {
-    // ダークモードでの視認性を向上させるための色調整
     final isDark = theme.brightness == Brightness.dark;
     final titleColor =
         isDark ? Colors.white : theme.textTheme.titleLarge?.color;
@@ -229,7 +232,6 @@ class _TutorialScreenState extends State<TutorialScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // アイコン
           Container(
             width: 120,
             height: 120,
@@ -252,8 +254,6 @@ class _TutorialScreenState extends State<TutorialScreen> {
             ),
           ),
           const SizedBox(height: 40),
-
-          // タイトル
           Text(
             title,
             style: TextStyle(
@@ -265,8 +265,6 @@ class _TutorialScreenState extends State<TutorialScreen> {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 20),
-
-          // 説明
           Text(
             description,
             style: TextStyle(
@@ -279,8 +277,6 @@ class _TutorialScreenState extends State<TutorialScreen> {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 20),
-
-          // 詳細
           Text(
             details,
             style: TextStyle(
