@@ -58,6 +58,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  String _currentUserSubtitle() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      return 'ログイン状態ではありません';
+    }
+    if (user.isAnonymous) {
+      return 'ゲストアカウントで利用中';
+    }
+    return user.email ?? 'ゲストアカウントで利用中';
+  }
+
   Future<void> _signOut() async {
     if (_isSigningOut) {
       return;
@@ -1145,8 +1156,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: ListTile(
               leading: const Icon(Icons.logout, color: Colors.redAccent),
               title: const Text('ログアウト'),
-              subtitle: Text(
-                  FirebaseAuth.instance.currentUser?.email ?? 'ログイン状態ではありません'),
+              subtitle: Text(_currentUserSubtitle()),
               trailing: _isSigningOut
                   ? const SizedBox(
                       width: 16,

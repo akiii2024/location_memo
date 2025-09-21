@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import '../models/memo.dart';
 import '../models/map_info.dart';
 import '../utils/database_helper.dart';
+import '../utils/collaboration_sync_coordinator.dart';
 import '../utils/ai_service.dart';
 import '../utils/audio_service.dart';
 import '../utils/image_helper.dart';
@@ -348,10 +349,25 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
             : _selectedMushroomGrowthPattern,
       );
 
-      await DatabaseHelper.instance.create(memo);
+      final savedMemo = await DatabaseHelper.instance.create(memo);
+      try {
+        await CollaborationSyncCoordinator.instance
+            .onLocalMemoCreated(savedMemo);
+      } catch (error, stackTrace) {
+        debugPrint('Failed to sync memo creation: $error');
+        debugPrintStack(stackTrace: stackTrace);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('共同編集への同期に失敗しました: $error'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('記録を保存しました（ピン番号: $nextPinNumber）'),
+          content: Text('記録を保存しました！ピン番号: $nextPinNumber'),
           backgroundColor: Colors.green,
         ),
       );

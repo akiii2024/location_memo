@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:convert';
 import '../models/map_info.dart';
 import '../utils/database_helper.dart';
+import '../utils/collaboration_sync_coordinator.dart';
 import 'add_map_screen.dart';
 import 'map_screen.dart';
 
@@ -97,15 +98,8 @@ class _MapListScreenState extends State<MapListScreen> {
 
     try {
       await DatabaseHelper.instance.deleteMap(mapInfo.id!);
-
-      // 画像ファイルも削除
-      if (mapInfo.imagePath != null) {
-        final imageFile = File(mapInfo.imagePath!);
-        if (await imageFile.exists()) {
-          await imageFile.delete();
-        }
-      }
-
+      await CollaborationSyncCoordinator.instance
+          .unregisterCollaborativeMap(mapInfo.id!);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('地図を削除しました'),

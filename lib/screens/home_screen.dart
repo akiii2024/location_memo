@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:location_memo/utils/offline_mode_provider.dart';
 import '../models/map_info.dart';
 import '../utils/database_helper.dart';
+import '../utils/collaboration_sync_coordinator.dart';
 import '../utils/firebase_map_service.dart';
 import 'add_map_screen.dart';
 import 'auth_screen.dart';
@@ -123,6 +124,8 @@ class _HomeScreenState extends State<HomeScreen> {
     if (confirmed == true) {
       try {
         await DatabaseHelper.instance.deleteMap(mapInfo.id!);
+        await CollaborationSyncCoordinator.instance
+            .unregisterCollaborativeMap(mapInfo.id!);
         // 地図ファイルも削除
         if (mapInfo.imagePath != null) {
           final file = File(mapInfo.imagePath!);
@@ -251,6 +254,20 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       if (result.success) {
         await _loadMaps();
+        if (mapInfo.id != null &&
+            await CollaborationSyncCoordinator.instance
+                .isCollaborative(mapInfo.id!)) {
+          final currentUser = FirebaseAuth.instance.currentUser;
+          if (currentUser != null) {
+            await CollaborationSyncCoordinator.instance
+                .registerCollaborativeMap(
+              mapId: mapInfo.id!,
+              ownerUid: currentUser.uid,
+              isOwner: true,
+              ownerEmail: currentUser.email,
+            );
+          }
+        }
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(result.message)),
@@ -450,6 +467,7 @@ class _HomeScreenState extends State<HomeScreen> {
               title: Text('共有設定 (${mapInfo.title})'),
               content: SizedBox(
                 width: 420,
+                height: 400,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -470,59 +488,70 @@ class _HomeScreenState extends State<HomeScreen> {
                       label: const Text('共有ユーザーを追加'),
                     ),
                     const SizedBox(height: 16),
-                    if (isLoading)
-                      const Center(child: CircularProgressIndicator())
-                    else if (loadError != null)
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                    Expanded(
+                      child: Column(
                         children: [
-                          Text(
-                            loadError!,
-                            style: const TextStyle(color: Colors.red),
-                          ),
-                          const SizedBox(height: 8),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton(
-                              onPressed: () async {
-                                await refreshSharedUsers();
-                              },
-                              child: const Text('再試行'),
-                            ),
-                          ),
-                        ],
-                      )
-                    else
-                      SizedBox(
-                        height: 220,
-                        child: sharedUsers.isEmpty
-                            ? const Center(
-                                child: Text('共有中のユーザーはいません。'),
-                              )
-                            : ListView.builder(
-                                itemCount: sharedUsers.length,
-                                itemBuilder: (context, index) {
-                                  final user = sharedUsers[index];
-                                  return ListTile(
-                                    leading: const Icon(Icons.person_outline),
-                                    title: Text(user.email),
-                                    subtitle: user.displayName != null &&
-                                            user.displayName!.isNotEmpty
-                                        ? Text(user.displayName!)
-                                        : null,
-                                    trailing: IconButton(
-                                      icon: const Icon(Icons.close),
-                                      onPressed: isMutating
-                                          ? null
-                                          : () async {
-                                              await handleRevoke(user.uid);
-                                            },
-                                      tooltip: '共有を解除',
+                          if (isLoading)
+                            const Expanded(
+                              child: Center(child: CircularProgressIndicator()),
+                            )
+                          else if (loadError != null)
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Text(
+                                    loadError!,
+                                    style: const TextStyle(color: Colors.red),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: TextButton(
+                                      onPressed: () async {
+                                        await refreshSharedUsers();
+                                      },
+                                      child: const Text('再試行'),
                                     ),
-                                  );
-                                },
+                                  ),
+                                ],
                               ),
+                            )
+                          else
+                            Expanded(
+                              child: sharedUsers.isEmpty
+                                  ? const Center(
+                                      child: Text('共有中のユーザーはいません。'),
+                                    )
+                                  : ListView.builder(
+                                      itemCount: sharedUsers.length,
+                                      itemBuilder: (context, index) {
+                                        final user = sharedUsers[index];
+                                        return ListTile(
+                                          leading:
+                                              const Icon(Icons.person_outline),
+                                          title: Text(user.email),
+                                          subtitle: user.displayName != null &&
+                                                  user.displayName!.isNotEmpty
+                                              ? Text(user.displayName!)
+                                              : null,
+                                          trailing: IconButton(
+                                            icon: const Icon(Icons.close),
+                                            onPressed: isMutating
+                                                ? null
+                                                : () async {
+                                                    await handleRevoke(
+                                                        user.uid);
+                                                  },
+                                            tooltip: '共有を解除',
+                                          ),
+                                        );
+                                      },
+                                    ),
+                            ),
+                        ],
                       ),
+                    ),
                   ],
                 ),
               ),
@@ -539,7 +568,9 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       },
     );
-    emailController.dispose();
+    if (mounted) {
+      emailController.dispose();
+    }
   }
 
   Future<void> _showRemoteMapsDialog() async {
@@ -702,6 +733,16 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       if (result.success) {
         await _loadMaps();
+        if (!asImport) {
+          final currentUser = FirebaseAuth.instance.currentUser;
+          final isOwner = currentUser?.uid == summary.ownerId;
+          await CollaborationSyncCoordinator.instance.registerCollaborativeMap(
+            mapId: summary.mapId,
+            ownerUid: summary.ownerId,
+            isOwner: isOwner,
+            ownerEmail: summary.ownerEmail,
+          );
+        }
       }
     } catch (error) {
       if (!mounted) {

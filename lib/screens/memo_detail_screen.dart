@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/memo.dart';
 import '../models/map_info.dart';
 import '../utils/database_helper.dart';
+import '../utils/collaboration_sync_coordinator.dart';
 import '../utils/image_helper.dart';
 import 'location_picker_screen.dart';
 import 'dart:io';
@@ -207,6 +208,19 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                   );
 
                   await DatabaseHelper.instance.update(updatedMemo);
+                  try {
+                    await CollaborationSyncCoordinator.instance
+                        .onLocalMemoUpdated(updatedMemo);
+                  } catch (error, stackTrace) {
+                    debugPrint('Failed to sync memo update: $error');
+                    debugPrintStack(stackTrace: stackTrace);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('共同編集への同期に失敗しました: $error'),
+                        backgroundColor: Colors.orange,
+                      ),
+                    );
+                  }
 
                   // 画面を更新
                   setState(() {
@@ -948,6 +962,19 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
 
                     // データベースから削除
                     await DatabaseHelper.instance.delete(widget.memo.id!);
+                    try {
+                      await CollaborationSyncCoordinator.instance
+                          .onLocalMemoDeleted(widget.memo);
+                    } catch (error, stackTrace) {
+                      debugPrint('Failed to sync memo deletion: $error');
+                      debugPrintStack(stackTrace: stackTrace);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('共同編集からの削除同期に失敗しました: $error'),
+                          backgroundColor: Colors.orange,
+                        ),
+                      );
+                    }
 
                     // 成功メッセージを表示
                     if (mounted) {

@@ -10,6 +10,7 @@ import 'package:path/path.dart' as path;
 import 'package:hive/hive.dart';
 import '../models/memo.dart';
 import '../utils/database_helper.dart';
+import '../utils/collaboration_sync_coordinator.dart';
 
 class CustomMapWidget extends StatefulWidget {
   final List<Memo> memos;
@@ -621,6 +622,19 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
                   );
 
                   await DatabaseHelper.instance.update(updatedMemo);
+                  try {
+                    await CollaborationSyncCoordinator.instance
+                        .onLocalMemoUpdated(updatedMemo);
+                  } catch (error, stackTrace) {
+                    debugPrint('Failed to sync pin update: $error');
+                    debugPrintStack(stackTrace: stackTrace);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('共同編集への同期に失敗しました: $error'),
+                        backgroundColor: Colors.orange,
+                      ),
+                    );
+                  }
 
                   // 親ウィジェットに更新を通知
                   if (widget.onMemosUpdated != null) {
@@ -628,6 +642,7 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
                   }
 
                   Navigator.of(context).pop();
+
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text('ピン番号を $newNumber に更新しました')),
                   );

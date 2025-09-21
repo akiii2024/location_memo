@@ -58,42 +58,22 @@ class _AuthScreenState extends State<AuthScreen> {
           if (displayName.isNotEmpty) {
             await user.updateDisplayName(displayName);
           }
-          await FirebaseFirestore.instance
-              .collection('userProfiles')
-              .doc(user.uid)
-              .set({
-            'email': user.email,
-            'emailLower': user.email?.toLowerCase(),
-            'displayName': displayName.isNotEmpty ? displayName : null,
-            'createdAt': FieldValue.serverTimestamp(),
-            'updatedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
+          await _upsertUserProfile(
+            user,
+            includeCreatedAt: true,
+            additionalData: {
+              'displayName': displayName.isNotEmpty ? displayName : null,
+            },
+          );
         }
       }
 
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
-        await FirebaseFirestore.instance
-            .collection('userProfiles')
-            .doc(user.uid)
-            .set({
-          'email': user.email,
-          'emailLower': user.email?.toLowerCase(),
-          'displayName': user.displayName,
-          'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+        await _upsertUserProfile(user);
       }
 
-      if (!mounted) {
-        return;
-      }
-
-      await context.read<OfflineModeProvider>().disableOfflineMode();
-
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const MainScreen()),
-        (route) => false,
-      );
+      await _completeSignInFlow();
     } on FirebaseAuthException catch (error) {
       final message = _errorMessage(error);
       if (mounted) {
@@ -134,6 +114,107 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
+  Future<void> _continueAsGuest() async {
+    if (_isLoading) {
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final credential = await FirebaseAuth.instance.signInAnonymously();
+      final user = credential.user ?? FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        throw StateError('Guest sign-in failed.');
+      }
+
+      const guestDisplayName = 'ゲストユーザー';
+      var displayName = user.displayName;
+      if (displayName == null || displayName.isEmpty) {
+        await user.updateDisplayName(guestDisplayName);
+        displayName = guestDisplayName;
+      }
+
+      final refreshedUser = FirebaseAuth.instance.currentUser ?? user;
+      await _upsertUserProfile(
+        refreshedUser,
+        includeCreatedAt: true,
+        additionalData: {
+          'displayName': displayName,
+        },
+      );
+
+      await _completeSignInFlow();
+    } on FirebaseAuthException catch (error) {
+      final message = error.code == 'operation-not-allowed'
+          ? 'ゲストログインは現在利用できません。'
+          : _errorMessage(error);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message)),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('エラーが発生しました: $error')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _upsertUserProfile(
+    User user, {
+    bool includeCreatedAt = false,
+    Map<String, dynamic>? additionalData,
+  }) async {
+    final data = <String, dynamic>{
+      'email': user.email,
+      'emailLower': user.email?.toLowerCase(),
+      'displayName': user.displayName,
+      'isGuest': user.isAnonymous,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+
+    if (includeCreatedAt) {
+      data['createdAt'] = FieldValue.serverTimestamp();
+    }
+
+    if (additionalData != null) {
+      data.addAll(additionalData);
+    }
+
+    await FirebaseFirestore.instance
+        .collection('userProfiles')
+        .doc(user.uid)
+        .set(data, SetOptions(merge: true));
+  }
+
+  Future<void> _completeSignInFlow() async {
+    if (!mounted) {
+      return;
+    }
+
+    await context.read<OfflineModeProvider>().disableOfflineMode();
+
+    if (!mounted) {
+      return;
+    }
+
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const MainScreen()),
+      (route) => false,
+    );
+  }
+
   String _errorMessage(FirebaseAuthException error) {
     switch (error.code) {
       case 'invalid-email':
@@ -149,6 +230,10 @@ class _AuthScreenState extends State<AuthScreen> {
         return 'パスワードは6文字以上で設定してください';
       case 'too-many-requests':
         return '試行回数が多すぎます。しばらく待ってから再試行してください';
+      case 'operation-not-allowed':
+        return '現在このログイン方法は利用できません。';
+      case 'network-request-failed':
+        return 'ネットワークに接続できませんでした。通信状況を確認してください。';
       default:
         return '認証に失敗しました: ${error.message ?? error.code}';
     }
@@ -274,6 +359,15 @@ class _AuthScreenState extends State<AuthScreen> {
                                     CircularProgressIndicator(strokeWidth: 2),
                               )
                             : Text(_isLogin ? 'ログイン' : 'アカウントを作成'),
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: _isLoading ? null : _continueAsGuest,
+                        icon: const Icon(Icons.person_outline),
+                        label: const Text('ゲストとして利用'),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(48),
+                        ),
                       ),
                       const SizedBox(height: 12),
                       OutlinedButton.icon(

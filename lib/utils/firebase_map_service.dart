@@ -79,6 +79,24 @@ class FirebaseMapService {
 
   static int _memoIdFallbackCounter = 0;
 
+  DocumentReference<Map<String, dynamic>> _mapDocument(
+    String uid,
+    int mapId,
+  ) {
+    return _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('maps')
+        .doc(mapId.toString());
+  }
+
+  CollectionReference<Map<String, dynamic>> _memoCollection(
+    String uid,
+    int mapId,
+  ) {
+    return _mapDocument(uid, mapId).collection('memos');
+  }
+
   Future<List<FirebaseRemoteMapSummary>> fetchRemoteMaps() async {
     final user = _requireUser();
 
@@ -410,6 +428,93 @@ class FirebaseMapService {
     }
   }
 
+  Stream<List<Memo>> subscribeToMapMemos({
+    required int mapId,
+    required String ownerUid,
+  }) {
+    final collection = _memoCollection(ownerUid, mapId);
+    return collection.snapshots().asyncMap((snapshot) async {
+      final memos = <Memo>[];
+      for (final doc in snapshot.docs) {
+        try {
+          final memo = await _memoFromSnapshot(mapId, doc);
+          memos.add(memo);
+        } catch (error, stackTrace) {
+          debugPrint('Failed to parse memo snapshot: $error');
+          debugPrintStack(stackTrace: stackTrace);
+        }
+      }
+      memos.sort((a, b) => (a.pinNumber ?? 0).compareTo(b.pinNumber ?? 0));
+      return memos;
+    });
+  }
+
+  Future<void> upsertMemo({
+    required int mapId,
+    required String ownerUid,
+    required Memo memo,
+  }) async {
+    if (memo.id == null) {
+      throw ArgumentError('memo.id is required to sync with Firebase');
+    }
+    final docRef = _memoCollection(ownerUid, mapId).doc(memo.id.toString());
+    final assets = await _uploadMemoAssets(ownerUid, mapId, memo.id, memo);
+
+    final data = <String, dynamic>{
+      'id': memo.id,
+      'title': memo.title,
+      'content': memo.content,
+      'latitude': memo.latitude,
+      'longitude': memo.longitude,
+      'discoveryTime': memo.discoveryTime?.millisecondsSinceEpoch,
+      'discoverer': memo.discoverer,
+      'specimenNumber': memo.specimenNumber,
+      'category': memo.category,
+      'notes': memo.notes,
+      'pinNumber': memo.pinNumber,
+      'mapId': memo.mapId,
+      'audioUrl': assets.audioUrl,
+      'imageUrls': assets.imageUrls,
+      'mushroomCapShape': memo.mushroomCapShape,
+      'mushroomCapColor': memo.mushroomCapColor,
+      'mushroomCapSurface': memo.mushroomCapSurface,
+      'mushroomCapSize': memo.mushroomCapSize,
+      'mushroomCapUnderStructure': memo.mushroomCapUnderStructure,
+      'mushroomGillFeature': memo.mushroomGillFeature,
+      'mushroomStemPresence': memo.mushroomStemPresence,
+      'mushroomStemShape': memo.mushroomStemShape,
+      'mushroomStemColor': memo.mushroomStemColor,
+      'mushroomStemSurface': memo.mushroomStemSurface,
+      'mushroomRingPresence': memo.mushroomRingPresence,
+      'mushroomVolvaPresence': memo.mushroomVolvaPresence,
+      'mushroomHabitat': memo.mushroomHabitat,
+      'mushroomGrowthPattern': memo.mushroomGrowthPattern,
+      'layer': memo.layer,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+
+    await docRef.set(data, SetOptions(merge: true));
+  }
+
+  Future<void> deleteMemo({
+    required int mapId,
+    required String ownerUid,
+    required int memoId,
+  }) async {
+    final docRef = _memoCollection(ownerUid, mapId).doc(memoId.toString());
+    await docRef.delete();
+    try {
+      final folderRef = _storage
+          .ref()
+          .child('users/$ownerUid/maps/$mapId/memos/${memoId.toString()}');
+      await _clearStorageFolder(folderRef);
+    } on FirebaseException catch (error) {
+      if (error.code != 'object-not-found') {
+        rethrow;
+      }
+    }
+  }
+
   Future<FirebaseMapShareResult> shareMapWithEmail({
     required int mapId,
     required String email,
@@ -685,6 +790,91 @@ class FirebaseMapService {
         'updatedAt': FieldValue.serverTimestamp(),
       });
     }
+  }
+
+  Future<Memo> _memoFromSnapshot(
+    int mapId,
+    DocumentSnapshot<Map<String, dynamic>> memoDoc,
+  ) async {
+    final memoData = memoDoc.data();
+    if (memoData == null) {
+      throw StateError('Memo document ${memoDoc.id} has no data');
+    }
+
+    final parsedId = int.tryParse(memoDoc.id);
+    final memoId = parsedId ??
+        (memoData['id'] is num ? (memoData['id'] as num).toInt() : null);
+    if (memoId == null) {
+      throw StateError('Memo document ${memoDoc.id} is missing an integer id');
+    }
+
+    final discoveryTime = _parseTimestamp(memoData['discoveryTime']);
+
+    final imageUrlsRaw = memoData['imageUrls'];
+    final imageUrls = imageUrlsRaw is Iterable
+        ? imageUrlsRaw
+            .map((entry) => entry.toString())
+            .where((entry) => entry.isNotEmpty)
+            .toList()
+        : const <String>[];
+    final localImages = <String>[];
+    for (var i = 0; i < imageUrls.length; i++) {
+      final resolved = await _downloadBinaryFromUrl(
+        imageUrls[i],
+        defaultContentType: 'image/png',
+      );
+      if (resolved != null) {
+        final saved = await _saveMemoImage(mapId, memoDoc.id, i, resolved);
+        if (saved != null) {
+          localImages.add(saved);
+        }
+      }
+    }
+
+    String? audioPath;
+    final audioUrl = memoData['audioUrl']?.toString();
+    if (audioUrl != null && audioUrl.isNotEmpty) {
+      final resolved = await _downloadBinaryFromUrl(
+        audioUrl,
+        defaultContentType: 'audio/aac',
+      );
+      if (resolved != null) {
+        audioPath = await _saveMemoAudio(mapId, memoDoc.id, resolved);
+      }
+    }
+
+    return Memo(
+      id: memoId,
+      title: memoData['title']?.toString() ?? '',
+      content: memoData['content']?.toString() ?? '',
+      latitude: (memoData['latitude'] as num?)?.toDouble(),
+      longitude: (memoData['longitude'] as num?)?.toDouble(),
+      discoveryTime: discoveryTime,
+      discoverer: memoData['discoverer']?.toString(),
+      specimenNumber: memoData['specimenNumber']?.toString(),
+      category: memoData['category']?.toString(),
+      notes: memoData['notes']?.toString(),
+      pinNumber: (memoData['pinNumber'] as num?)?.toInt(),
+      mapId: mapId,
+      audioPath: audioPath,
+      imagePaths: localImages.isEmpty ? null : localImages,
+      mushroomCapShape: memoData['mushroomCapShape']?.toString(),
+      mushroomCapColor: memoData['mushroomCapColor']?.toString(),
+      mushroomCapSurface: memoData['mushroomCapSurface']?.toString(),
+      mushroomCapSize: memoData['mushroomCapSize']?.toString(),
+      mushroomCapUnderStructure:
+          memoData['mushroomCapUnderStructure']?.toString(),
+      mushroomGillFeature: memoData['mushroomGillFeature']?.toString(),
+      mushroomStemPresence: memoData['mushroomStemPresence']?.toString(),
+      mushroomStemShape: memoData['mushroomStemShape']?.toString(),
+      mushroomStemColor: memoData['mushroomStemColor']?.toString(),
+      mushroomStemSurface: memoData['mushroomStemSurface']?.toString(),
+      mushroomRingPresence: memoData['mushroomRingPresence']?.toString(),
+      mushroomVolvaPresence: memoData['mushroomVolvaPresence']?.toString(),
+      mushroomHabitat: memoData['mushroomHabitat']?.toString(),
+      mushroomGrowthPattern: memoData['mushroomGrowthPattern']?.toString(),
+      layer: (memoData['layer'] as num?)?.toInt(),
+    );
   }
 
   Future<_UploadedAssets> _uploadMemoAssets(

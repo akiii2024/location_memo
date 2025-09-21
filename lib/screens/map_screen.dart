@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:hive/hive.dart';
 import 'dart:io';
@@ -8,6 +10,8 @@ import '../models/memo.dart';
 import '../models/map_info.dart';
 import '../utils/database_helper.dart';
 import '../utils/firebase_map_service.dart';
+import '../utils/collaboration_metadata_store.dart';
+import '../utils/collaboration_sync_coordinator.dart';
 import '../utils/print_helper.dart';
 import '../utils/ai_service.dart';
 import '../widgets/custom_map_widget.dart';
@@ -35,6 +39,10 @@ class _MapScreenState extends State<MapScreen> {
   bool _isUploading = false;
   bool _isDownloading = false;
   Box? _layerNameBox; // レイヤー名ボックス
+  CollaborationMetadata? _collaborationMetadata;
+  StreamSubscription<List<Memo>>? _collaborationSubscription;
+  bool _isCollaborationConnecting = false;
+  String? _collaborationError;
 
   String _layerDisplayName(int layer) {
     if (_layerNameBox == null) {
@@ -257,6 +265,19 @@ class _MapScreenState extends State<MapScreen> {
             _customMapPath = updatedMap!.imagePath ?? _customMapPath;
           });
         }
+        if (await CollaborationSyncCoordinator.instance
+            .isCollaborative(currentMapId)) {
+          final currentUser = FirebaseAuth.instance.currentUser;
+          if (currentUser != null) {
+            await CollaborationSyncCoordinator.instance
+                .registerCollaborativeMap(
+              mapId: currentMapId,
+              ownerUid: currentUser.uid,
+              isOwner: true,
+              ownerEmail: currentUser.email,
+            );
+          }
+        }
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -300,6 +321,8 @@ class _MapScreenState extends State<MapScreen> {
     if (widget.mapInfo?.imagePath != null) {
       _customMapPath = widget.mapInfo!.imagePath;
     }
+
+    unawaited(_setupCollaboration());
   }
 
   Future<void> _loadCustomMapPath() async {
@@ -326,6 +349,216 @@ class _MapScreenState extends State<MapScreen> {
     } catch (e) {
       print('地図ファイルの読み込み中にエラーが発生しました: $e');
     }
+  }
+
+  Future<void> _setupCollaboration() async {
+    final mapId = widget.mapInfo?.id;
+    if (mapId == null) {
+      if (_collaborationMetadata != null || _collaborationError != null) {
+        setState(() {
+          _collaborationMetadata = null;
+          _collaborationError = null;
+        });
+      }
+      return;
+    }
+    try {
+      final metadata =
+          await CollaborationMetadataStore.instance.getForMap(mapId);
+      if (!mounted) {
+        return;
+      }
+      if (metadata == null) {
+        setState(() {
+          _collaborationMetadata = null;
+          _collaborationError = null;
+        });
+        await _stopCollaborationListener();
+        return;
+      }
+      await _startCollaborationListener(mapId, metadata);
+    } catch (error, stackTrace) {
+      debugPrint('Failed to load collaboration metadata: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  Future<void> _startCollaborationListener(
+    int mapId,
+    CollaborationMetadata metadata,
+  ) async {
+    await _collaborationSubscription?.cancel();
+    setState(() {
+      _collaborationMetadata = metadata;
+      _isCollaborationConnecting = true;
+      _collaborationError = null;
+    });
+    try {
+      _collaborationSubscription = FirebaseMapService.instance
+          .subscribeToMapMemos(mapId: mapId, ownerUid: metadata.ownerUid)
+          .listen(
+        (remoteMemos) {
+          unawaited(DatabaseHelper.instance
+              .replaceMemosForMap(mapId, List<Memo>.from(remoteMemos)));
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            _collaborationError = null;
+          });
+          unawaited(_loadMemos());
+        },
+        onError: (error, stackTrace) {
+          debugPrint('Collaboration stream error: $error');
+          debugPrintStack(stackTrace: stackTrace);
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            _collaborationError = 'リアルタイム同期でエラーが発生しました';
+          });
+        },
+      );
+    } catch (error, stackTrace) {
+      debugPrint('Failed to start collaboration listener: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _collaborationError = error.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCollaborationConnecting = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _stopCollaborationListener() async {
+    await _collaborationSubscription?.cancel();
+    _collaborationSubscription = null;
+  }
+
+  Future<void> _enableCollaboration() async {
+    if (_isCollaborationConnecting) {
+      return;
+    }
+    final mapInfo = widget.mapInfo;
+    if (mapInfo?.id == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Firebaseにアップロードする前に地図を保存してください')),
+      );
+      return;
+    }
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('共同編集を利用するにはログインが必要です')),
+      );
+      return;
+    }
+    setState(() {
+      _isCollaborationConnecting = true;
+    });
+    try {
+      final result = await FirebaseMapService.instance.uploadMap(mapInfo!);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.message)),
+      );
+      if (!result.success) {
+        return;
+      }
+      await CollaborationSyncCoordinator.instance.registerCollaborativeMap(
+        mapId: mapInfo.id!,
+        ownerUid: currentUser.uid,
+        isOwner: true,
+        ownerEmail: currentUser.email,
+      );
+      await _setupCollaboration();
+    } catch (error, stackTrace) {
+      debugPrint('Failed to enable collaboration: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('共同編集の有効化に失敗しました: $error')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCollaborationConnecting = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _disableCollaboration() async {
+    final mapId = widget.mapInfo?.id;
+    if (mapId == null) {
+      return;
+    }
+    await _stopCollaborationListener();
+    await CollaborationSyncCoordinator.instance
+        .unregisterCollaborativeMap(mapId);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _collaborationMetadata = null;
+      _collaborationError = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('共同編集を無効にしました')),
+    );
+    unawaited(_loadMemos());
+  }
+
+  Widget _buildCollaborationBanner(BuildContext context) {
+    final metadata = _collaborationMetadata;
+    if (metadata == null) {
+      return const SizedBox.shrink();
+    }
+    final theme = Theme.of(context);
+    final hasError = _collaborationError != null;
+    final backgroundColor = theme.colorScheme.surfaceVariant.withOpacity(
+      theme.brightness == Brightness.dark ? 0.6 : 0.4,
+    );
+    final statusText = _collaborationError ??
+        (metadata.isOwner ? '共同編集を有効化（所有者）' : '共同編集に参加中');
+    final iconData = hasError ? Icons.error_outline : Icons.groups;
+    return Container(
+      width: double.infinity,
+      color: backgroundColor,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Icon(
+            iconData,
+            color:
+                hasError ? theme.colorScheme.error : theme.colorScheme.primary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              statusText,
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+          if (_isCollaborationConnecting)
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+        ],
+      ),
+    );
   }
 
   Future<void> _loadMemos() async {
@@ -704,7 +937,14 @@ class _MapScreenState extends State<MapScreen> {
           );
 
           // データベースに保存
-          await DatabaseHelper.instance.create(memo);
+          final savedMemo = await DatabaseHelper.instance.create(memo);
+          try {
+            await CollaborationSyncCoordinator.instance
+                .onLocalMemoCreated(savedMemo);
+          } catch (error, stackTrace) {
+            debugPrint('Failed to sync imported memo: $error');
+            debugPrintStack(stackTrace: stackTrace);
+          }
           successCount++;
         } catch (e) {
           print('Map Debug: 記録の保存に失敗: ${record['title']}, エラー: $e');
@@ -839,6 +1079,12 @@ class _MapScreenState extends State<MapScreen> {
             onSelected: (value) async {
               try {
                 switch (value) {
+                  case 'enable_collaboration':
+                    await _enableCollaboration();
+                    break;
+                  case 'disable_collaboration':
+                    await _disableCollaboration();
+                    break;
                   case 'upload_map':
                     await _uploadMapToFirebase();
                     break;
@@ -904,6 +1150,44 @@ class _MapScreenState extends State<MapScreen> {
               }
             },
             itemBuilder: (context) => [
+              if (_collaborationMetadata == null)
+                PopupMenuItem(
+                  value: 'enable_collaboration',
+                  enabled:
+                      widget.mapInfo?.id != null && !_isCollaborationConnecting,
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.groups,
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Colors.white
+                            : Colors.black,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(_isCollaborationConnecting
+                          ? '共同編集を準備中...'
+                          : '共同編集を有効化'),
+                    ],
+                  ),
+                )
+              else
+                PopupMenuItem(
+                  value: 'disable_collaboration',
+                  enabled: !_isCollaborationConnecting,
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.group_off,
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Colors.white
+                            : Colors.black,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text('共同編集を停止'),
+                    ],
+                  ),
+                ),
+              const PopupMenuDivider(),
               PopupMenuItem(
                 value: 'upload_map',
                 enabled: !_isUploading && !_isDownloading,
@@ -1023,13 +1307,22 @@ class _MapScreenState extends State<MapScreen> {
           ),
         ],
       ),
-      body: CustomMapWidget(
-        key: _mapWidgetKey,
-        memos: _memos.where((m) => (m.layer ?? 0) == _currentLayer).toList(),
-        onTap: _onMapTap,
-        onMemoTap: _onMemoTap,
-        customImagePath: _customMapPath,
-        onMemosUpdated: _loadMemos, // メモ更新時のコールバックを追加
+      body: Column(
+        children: [
+          if (_collaborationMetadata != null)
+            _buildCollaborationBanner(context),
+          Expanded(
+            child: CustomMapWidget(
+              key: _mapWidgetKey,
+              memos:
+                  _memos.where((m) => (m.layer ?? 0) == _currentLayer).toList(),
+              onTap: _onMapTap,
+              onMemoTap: _onMemoTap,
+              customImagePath: _customMapPath,
+              onMemosUpdated: _loadMemos, // メモ更新時のコールバックを追加
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
@@ -1065,5 +1358,11 @@ class _MapScreenState extends State<MapScreen> {
         tooltip: '新しい記録を追加',
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _collaborationSubscription?.cancel();
+    super.dispose();
   }
 }
