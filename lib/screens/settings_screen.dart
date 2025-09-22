@@ -6,6 +6,7 @@ import 'map_list_screen.dart';
 import 'tutorial_screen.dart';
 import 'auth_screen.dart';
 import 'about_app_screen.dart';
+import 'profile_screen.dart';
 import '../utils/theme_provider.dart';
 import '../utils/app_info.dart';
 import '../utils/ai_service.dart';
@@ -63,10 +64,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (user == null) {
       return 'ログイン状態ではありません';
     }
+    return _buildAccountSummary(user);
+  }
+
+  String _buildAccountSummary(User user) {
+    final displayName = user.displayName;
+    final email = user.email;
     if (user.isAnonymous) {
+      if (displayName != null && displayName.isNotEmpty) {
+        return '$displayName（ゲスト）';
+      }
       return 'ゲストアカウントで利用中';
     }
-    return user.email ?? 'ゲストアカウントで利用中';
+    if (displayName != null && displayName.isNotEmpty && email != null) {
+      return '$displayName / $email';
+    }
+    if (displayName != null && displayName.isNotEmpty) {
+      return displayName;
+    }
+    return email ?? 'アカウント情報を取得できません';
   }
 
   Future<void> _signOut() async {
@@ -1122,6 +1138,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final offlineModeProvider = context.watch<OfflineModeProvider>();
+    final isOfflineMode = offlineModeProvider.isOfflineMode;
+    final currentUser = FirebaseAuth.instance.currentUser;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('設定'),
@@ -1151,6 +1171,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
           ),
           const SizedBox(height: 8),
+          if (currentUser != null && !isOfflineMode) ...[
+            Card(
+              elevation: 2,
+              child: ListTile(
+                leading: Icon(Icons.person, color: Colors.blueGrey.shade600),
+                title: const Text('プロフィール'),
+                subtitle: Text(_buildAccountSummary(currentUser)),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ProfileScreen()),
+                  );
+                  final refreshedUser = FirebaseAuth.instance.currentUser;
+                  if (refreshedUser != null) {
+                    await refreshedUser.reload();
+                  }
+                  if (!mounted) {
+                    return;
+                  }
+                  setState(() {});
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           Card(
             elevation: 2,
             child: ListTile(
@@ -1171,33 +1216,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   : _signOut,
             ),
           ),
-          Consumer<OfflineModeProvider>(
-            builder: (context, offlineModeProvider, _) {
-              if (!offlineModeProvider.isOfflineMode) {
-                return const SizedBox.shrink();
-              }
-              return Card(
-                elevation: 2,
-                child: ListTile(
-                  leading:
-                      const Icon(Icons.cloud_off, color: Colors.orangeAccent),
-                  title: const Text('オフラインモードで利用中'),
-                  subtitle: const Text('オンライン機能を利用するにはログインしてください'),
-                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                  onTap: () async {
-                    await offlineModeProvider.disableOfflineMode();
-                    if (!mounted) {
-                      return;
-                    }
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const AuthScreen()),
-                    );
-                  },
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 8),
+          if (isOfflineMode) ...[
+            Card(
+              elevation: 2,
+              child: ListTile(
+                leading:
+                    const Icon(Icons.cloud_off, color: Colors.orangeAccent),
+                title: const Text('オフラインモードで利用中'),
+                subtitle: const Text('オンライン機能を利用するにはログインしてください'),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () async {
+                  await offlineModeProvider.disableOfflineMode();
+                  if (!mounted) {
+                    return;
+                  }
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AuthScreen()),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           Card(
             elevation: 2,
             child: ListTile(
