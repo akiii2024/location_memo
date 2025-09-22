@@ -1,6 +1,14 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+import '../utils/image_helper.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -12,6 +20,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final _formKey = GlobalKey<FormState>();
   final _displayNameController = TextEditingController();
+  final FirebaseStorage _storage = FirebaseStorage.instance;
   bool _isLoading = true;
   bool _isSaving = false;
   bool _isConvertingGuest = false;
@@ -21,6 +30,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   DateTime? _createdAt;
   DateTime? _updatedAt;
   String? _errorMessage;
+  String? _photoUrl;
+  String? _localPhotoPath;
+  Uint8List? _profileImageBytes;
+  bool _isUploadingPhoto = false;
 
   @override
   void initState() {
@@ -63,12 +76,59 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final firestoreDisplayName = data != null
           ? data['displayName'] as String?
           : null;
+      final firestorePhotoUrl =
+          data != null ? data['photoUrl'] as String? : null;
       final createdAt = data != null ? data['createdAt'] : null;
       final updatedAt = data != null ? data['updatedAt'] : null;
 
       final initialDisplayName = (firestoreDisplayName?.trim().isNotEmpty ?? false)
           ? firestoreDisplayName!.trim()
           : (user.displayName ?? '');
+
+      final trimmedFirestorePhotoUrl =
+          firestorePhotoUrl != null && firestorePhotoUrl.trim().isNotEmpty
+              ? firestorePhotoUrl.trim()
+              : null;
+      final trimmedUserPhotoUrl =
+          user.photoURL != null && user.photoURL!.trim().isNotEmpty
+              ? user.photoURL!.trim()
+              : null;
+      final initialPhotoSource =
+          trimmedFirestorePhotoUrl ?? trimmedUserPhotoUrl;
+
+      String? resolvedPhotoUrl;
+      String? localPhotoPath;
+      Uint8List? decodedPhotoBytes;
+
+      if (initialPhotoSource != null && initialPhotoSource.isNotEmpty) {
+        if (initialPhotoSource.startsWith('data:image')) {
+          final commaIndex = initialPhotoSource.indexOf(',');
+          if (commaIndex != -1) {
+            final base64Data = initialPhotoSource.substring(commaIndex + 1);
+            try {
+              decodedPhotoBytes = base64Decode(base64Data);
+            } catch (error) {
+              debugPrint('Failed to decode profile image data: $error');
+            }
+          }
+        } else if (initialPhotoSource.startsWith('http')) {
+          resolvedPhotoUrl = initialPhotoSource;
+        } else if (!kIsWeb) {
+          try {
+            final file = File(initialPhotoSource);
+            if (await file.exists()) {
+              localPhotoPath = initialPhotoSource;
+            } else {
+              resolvedPhotoUrl = initialPhotoSource;
+            }
+          } catch (error) {
+            debugPrint('Failed to access local profile image: $error');
+            resolvedPhotoUrl = initialPhotoSource;
+          }
+        } else {
+          resolvedPhotoUrl = initialPhotoSource;
+        }
+      }
 
       _displayNameController.text = initialDisplayName;
 
@@ -90,6 +150,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _updatedAt = updatedAtDate;
           _errorMessage = null;
           _isLoading = false;
+          _photoUrl = resolvedPhotoUrl;
+          _localPhotoPath = localPhotoPath;
+          _profileImageBytes = decodedPhotoBytes;
         });
       }
     } catch (error) {
@@ -109,6 +172,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _saveProfile() async {
+    if (_isAnonymous) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ゲストアカウントでは表示名を変更できません。')),
+        );
+      }
+      return;
+    }
+
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -176,6 +248,196 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _isSaving = false;
         });
       }
+    }
+  }
+
+  Future<void> _changeProfileImage() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ユーザー情報を取得できませんでした。')),
+        );
+      }
+      return;
+    }
+
+    final imagePath = await ImageHelper.pickAndSaveImage(context);
+    if (imagePath == null) {
+      return;
+    }
+
+    final bytes = await _loadImageBytes(imagePath);
+    if (bytes == null || bytes.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('画像を読み込めませんでした。別の画像を選択してください。')),
+        );
+      }
+      return;
+    }
+
+    final previousBytes = _profileImageBytes;
+    final previousLocalPhotoPath = _localPhotoPath;
+    final previousPhotoUrl = _photoUrl;
+
+    if (mounted) {
+      setState(() {
+        _profileImageBytes = bytes;
+        _localPhotoPath =
+            imagePath.startsWith('data:image') ? null : imagePath;
+        _photoUrl = null;
+        _isUploadingPhoto = true;
+      });
+    }
+
+    try {
+      await _deleteExistingProfileImages(user.uid);
+
+      final contentType = _detectContentType(imagePath);
+      final extension = _extensionForContentType(contentType);
+      final fileRef = _storage
+          .ref()
+          .child('userProfiles')
+          .child(user.uid)
+          .child('profile$extension');
+
+      await fileRef.putData(
+        bytes,
+        SettableMetadata(
+          contentType: contentType,
+          cacheControl: 'public,max-age=3600',
+        ),
+      );
+
+      final downloadUrl = await fileRef.getDownloadURL();
+
+      await FirebaseFirestore.instance
+          .collection('userProfiles')
+          .doc(user.uid)
+          .set(
+        {
+          'photoUrl': downloadUrl,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+
+      await user.updatePhotoURL(downloadUrl);
+      await user.reload();
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('プロフィール画像を更新しました')),
+      );
+
+      await _loadProfile(showLoading: false);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _profileImageBytes = previousBytes;
+          _localPhotoPath = previousLocalPhotoPath;
+          _photoUrl = previousPhotoUrl;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('プロフィール画像の更新に失敗しました: $error')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploadingPhoto = false;
+        });
+      }
+    }
+  }
+
+  Future<Uint8List?> _loadImageBytes(String imagePath) async {
+    final trimmed = imagePath.trim();
+    try {
+      if (trimmed.startsWith('data:image')) {
+        final commaIndex = trimmed.indexOf(',');
+        if (commaIndex != -1) {
+          final base64Data = trimmed.substring(commaIndex + 1);
+          return base64Decode(base64Data);
+        }
+        return null;
+      }
+
+      if (!kIsWeb) {
+        final file = File(trimmed);
+        if (await file.exists()) {
+          return await file.readAsBytes();
+        }
+      }
+    } catch (error) {
+      debugPrint('Failed to load selected profile image: $error');
+    }
+    return null;
+  }
+
+  String _detectContentType(String imagePath) {
+    final trimmed = imagePath.trim();
+    if (trimmed.startsWith('data:')) {
+      final start = trimmed.indexOf(':') + 1;
+      final end = trimmed.indexOf(';', start);
+      if (start > 0 && end > start) {
+        return trimmed.substring(start, end);
+      }
+    }
+
+    final lower = trimmed.toLowerCase();
+    if (lower.endsWith('.png')) {
+      return 'image/png';
+    }
+    if (lower.endsWith('.gif')) {
+      return 'image/gif';
+    }
+    if (lower.endsWith('.webp')) {
+      return 'image/webp';
+    }
+    if (lower.endsWith('.heic') || lower.endsWith('.heif')) {
+      return 'image/heic';
+    }
+    if (lower.endsWith('.bmp')) {
+      return 'image/bmp';
+    }
+    return 'image/jpeg';
+  }
+
+  String _extensionForContentType(String contentType) {
+    switch (contentType) {
+      case 'image/png':
+        return '.png';
+      case 'image/gif':
+        return '.gif';
+      case 'image/webp':
+        return '.webp';
+      case 'image/heic':
+        return '.heic';
+      case 'image/bmp':
+        return '.bmp';
+      default:
+        return '.jpg';
+    }
+  }
+
+  Future<void> _deleteExistingProfileImages(String uid) async {
+    final folderRef = _storage.ref().child('userProfiles').child(uid);
+    try {
+      final listResult = await folderRef.listAll();
+      for (final item in listResult.items) {
+        await item.delete();
+      }
+    } on FirebaseException catch (error) {
+      if (error.code != 'object-not-found') {
+        debugPrint('Failed to delete old profile images: $error');
+      }
+    } catch (error) {
+      debugPrint('Failed to delete old profile images: $error');
     }
   }
 
@@ -449,6 +711,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       'emailLower': refreshedUser.email?.toLowerCase(),
       'isGuest': false,
       'updatedAt': FieldValue.serverTimestamp(),
+      'photoUrl': refreshedUser.photoURL,
     };
 
     if (trimmedDisplayName.isNotEmpty) {
@@ -493,6 +756,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return '$year/$month/$day $hour:$minute';
   }
 
+  ImageProvider<Object>? _resolveProfileImageProvider() {
+    if (_profileImageBytes != null && _profileImageBytes!.isNotEmpty) {
+      return MemoryImage(_profileImageBytes!);
+    }
+
+    if (!kIsWeb && _localPhotoPath != null && _localPhotoPath!.isNotEmpty) {
+      try {
+        return FileImage(File(_localPhotoPath!));
+      } catch (error) {
+        debugPrint('Failed to create FileImage: $error');
+      }
+    }
+
+    if (_photoUrl != null && _photoUrl!.isNotEmpty) {
+      return NetworkImage(_photoUrl!);
+    }
+
+    return null;
+  }
+
+  Widget _buildProfileAvatar(ThemeData theme) {
+    final imageProvider = _resolveProfileImageProvider();
+    return CircleAvatar(
+      radius: 48,
+      backgroundColor: theme.colorScheme.primary.withOpacity(0.1),
+      backgroundImage: imageProvider,
+      child: imageProvider == null
+          ? Icon(
+              Icons.person,
+              size: 48,
+              color: theme.colorScheme.primary,
+            )
+          : null,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -530,19 +829,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
       children: [
         Card(
           elevation: 2,
-          child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: theme.colorScheme.primary.withOpacity(0.1),
-              child: Icon(
-                Icons.person,
-                color: theme.colorScheme.primary,
-              ),
-            ),
-            title: Text(displayName.isEmpty ? '表示名は未設定です' : displayName),
-            subtitle: Text(
-              _isAnonymous
-                  ? 'ゲストアカウントで利用中'
-                  : (_email ?? 'メールアドレスは登録されていません'),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildProfileAvatar(theme),
+                const SizedBox(height: 16),
+                Text(
+                  displayName.isEmpty ? '表示名は未設定です' : displayName,
+                  style: theme.textTheme.titleMedium,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _isAnonymous
+                      ? 'ゲストアカウントで利用中'
+                      : (_email ?? 'メールアドレスは登録されていません'),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: secondaryTextColor,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                TextButton.icon(
+                  onPressed: _isUploadingPhoto ? null : _changeProfileImage,
+                  icon: _isUploadingPhoto
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.camera_alt_outlined),
+                  label: Text(
+                    _isUploadingPhoto ? 'アップロード中...' : '画像を変更',
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -570,6 +893,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _displayNameController,
+                    enabled: !_isAnonymous,
                     decoration: const InputDecoration(
                       labelText: '表示名',
                       prefixIcon: Icon(Icons.person_outline),
@@ -585,11 +909,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       return null;
                     },
                   ),
+                  if (_isAnonymous) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary.withOpacity(0.05),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'ゲストアカウントでは表示名を変更できません。アカウント登録を行うと変更できるようになります。',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: noteTextColor,
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
-                      onPressed: _isSaving ? null : _saveProfile,
+                      onPressed: (!_isAnonymous && !_isSaving)
+                          ? _saveProfile
+                          : null,
                       icon: _isSaving
                           ? const SizedBox(
                               width: 16,

@@ -180,6 +180,7 @@ class _AuthScreenState extends State<AuthScreen> {
       'email': user.email,
       'emailLower': user.email?.toLowerCase(),
       'displayName': user.displayName,
+      'photoUrl': user.photoURL,
       'isGuest': user.isAnonymous,
       'updatedAt': FieldValue.serverTimestamp(),
     };
