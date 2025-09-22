@@ -262,6 +262,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
 
+    if (user.isAnonymous) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ゲストアカウントではプロフィール画像を変更できません。')),
+        );
+      }
+      return;
+    }
+
     final imagePath = await ImageHelper.pickAndSaveImage(context);
     if (imagePath == null) {
       return;
@@ -853,18 +862,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 const SizedBox(height: 16),
                 TextButton.icon(
-                  onPressed: _isUploadingPhoto ? null : _changeProfileImage,
+                  onPressed:
+                      (_isUploadingPhoto || _isAnonymous) ? null : _changeProfileImage,
                   icon: _isUploadingPhoto
                       ? const SizedBox(
                           width: 16,
                           height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Icon(Icons.camera_alt_outlined),
+                      : Icon(
+                          _isAnonymous
+                              ? Icons.lock_outline
+                              : Icons.camera_alt_outlined,
+                        ),
                   label: Text(
-                    _isUploadingPhoto ? 'アップロード中...' : '画像を変更',
+                    _isUploadingPhoto
+                        ? 'アップロード中...'
+                        : _isAnonymous
+                            ? 'ゲストアカウントでは変更できません'
+                            : '画像を変更',
                   ),
                 ),
+                if (_isAnonymous) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'ゲストアカウントではプロフィール画像を変更できません。アカウント登録を行うと変更できるようになります。',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: secondaryTextColor,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
