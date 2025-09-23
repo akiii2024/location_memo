@@ -159,3 +159,7 @@ scripts/
 # Debug logs
 logs/
 debug.log
+
+# Firebase rules
+**/firebase/firestore.rules
+**/firebase/README.md
