@@ -40,7 +40,7 @@ class DatabaseHelper {
     final path = join(dbPath, filePath);
 
     final db = await openDatabase(path,
-        version: 9, onCreate: _createDB, onUpgrade: _upgradeDB);
+        version: 10, onCreate: _createDB, onUpgrade: _upgradeDB);
 
     // レイヤー列が存在しない場合は追加
     await _ensureLayerColumn(db);
@@ -70,6 +70,8 @@ CREATE TABLE memos (
   content $textType,
   latitude $realType,
   longitude $realType,
+  gpsLatitude $realType,
+  gpsLongitude $realType,
   discoveryTime $intType,
   discoverer $textNullType,
   specimenNumber $textNullType,
@@ -160,6 +162,10 @@ CREATE TABLE maps (
     if (oldVersion < 9) {
       await db.execute('ALTER TABLE memos ADD COLUMN layer INTEGER');
     }
+    if (oldVersion < 10) {
+      await db.execute('ALTER TABLE memos ADD COLUMN gpsLatitude REAL');
+      await db.execute('ALTER TABLE memos ADD COLUMN gpsLongitude REAL');
+    }
   }
 
   Future<Memo> create(Memo memo) async {
@@ -181,6 +187,8 @@ CREATE TABLE maps (
         mapId: memo.mapId,
         audioPath: memo.audioPath,
         imagePaths: memo.imagePaths,
+        gpsLatitude: memo.gpsLatitude,
+        gpsLongitude: memo.gpsLongitude,
         // キノコ詳細情報
         mushroomCapShape: memo.mushroomCapShape,
         mushroomCapColor: memo.mushroomCapColor,
@@ -261,6 +269,8 @@ CREATE TABLE maps (
           'pinNumber',
           'audioPath',
           'imagePaths',
+          'gpsLatitude',
+          'gpsLongitude',
           'mushroomCapShape',
           'mushroomCapColor',
           'mushroomCapSurface',

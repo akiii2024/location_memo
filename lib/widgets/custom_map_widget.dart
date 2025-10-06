@@ -619,6 +619,9 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
                     category: memo.category,
                     notes: memo.notes,
                     pinNumber: newNumber,
+                    mapId: memo.mapId,
+                    gpsLatitude: memo.gpsLatitude,
+                    gpsLongitude: memo.gpsLongitude,
                   );
 
                   await DatabaseHelper.instance.update(updatedMemo);

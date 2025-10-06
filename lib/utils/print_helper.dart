@@ -599,6 +599,13 @@ class PrintHelper {
           style: _createTextStyle(font, 9, color: PdfColors.grey600),
         ),
       ],
+      if (memo.gpsLatitude != null && memo.gpsLongitude != null) ...[
+        pw.SizedBox(height: 5),
+        pw.Text(
+          'GPS位置: (${memo.gpsLatitude!.toStringAsFixed(6)}, ${memo.gpsLongitude!.toStringAsFixed(6)})',
+          style: _createTextStyle(font, 9, color: PdfColors.grey600),
+        ),
+      ],
     ];
 
     // 添付画像がある場合は画像セクションを追加

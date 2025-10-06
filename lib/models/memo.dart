@@ -37,6 +37,12 @@ class Memo {
   @HiveField(28)
   int? layer; // レイヤー番号を追加
 
+  @HiveField(29)
+  double? gpsLatitude; // 実際のGPS緯度
+
+  @HiveField(30)
+  double? gpsLongitude; // 実際のGPS経度
+
   // キノコ詳細情報フィールド
   @HiveField(14)
   String? mushroomCapShape; // 傘の形
@@ -99,6 +105,8 @@ class Memo {
     this.mushroomHabitat,
     this.mushroomGrowthPattern,
     this.layer, // レイヤー番号
+    this.gpsLatitude, // 実際のGPS緯度
+    this.gpsLongitude, // 実際のGPS経度
   });
 
   Map<String, dynamic> toMap() {
@@ -118,6 +126,8 @@ class Memo {
       'audioPath': audioPath, // 音声ファイルのパス
       'imagePaths':
           imagePaths != null ? jsonEncode(imagePaths) : null, // JSON文字列として保存
+      'gpsLatitude': gpsLatitude,
+      'gpsLongitude': gpsLongitude,
       // キノコ詳細情報
       'mushroomCapShape': mushroomCapShape,
       'mushroomCapColor': mushroomCapColor,
@@ -158,6 +168,8 @@ class Memo {
       imagePaths: map['imagePaths'] != null
           ? List<String>.from(jsonDecode(map['imagePaths']))
           : null, // JSON文字列からList<String>に変換
+      gpsLatitude: map['gpsLatitude'],
+      gpsLongitude: map['gpsLongitude'],
       // キノコ詳細情報
       mushroomCapShape: map['mushroomCapShape'],
       mushroomCapColor: map['mushroomCapColor'],
