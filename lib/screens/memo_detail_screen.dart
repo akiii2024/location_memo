@@ -923,8 +923,11 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                         runSpacing: 8,
                         children: [
                           ElevatedButton.icon(
-                            onPressed:
-                                _isLocationLoading ? null : _selectLocation,
+                            onPressed: _isLocationLoading
+                                ? null
+                                : () async {
+                                    await _selectLocation();
+                                  },
                             icon: _isLocationLoading
                                 ? const SizedBox(
                                     width: 16,
@@ -942,7 +945,9 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                           OutlinedButton.icon(
                             onPressed: _isFetchingCurrentLocation
                                 ? null
-                                : _getCurrentLocation,
+                                : () async {
+                                    await _getCurrentLocation();
+                                  },
                             icon: _isFetchingCurrentLocation
                                 ? const SizedBox(
                                     width: 16,
