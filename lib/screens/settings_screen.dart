@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'map_list_screen.dart';
 import 'tutorial_screen.dart';
@@ -33,12 +34,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isSigningOut = false;
   BackupInfo? _backupInfo;
   List<MapInfo> _maps = [];
+  bool _alphaWarningEnabled = true;
+  bool _isLoadingAlphaWarningSetting = true;
+  bool _isSavingAlphaWarning = false;
 
   @override
   void initState() {
     super.initState();
     _loadBackupInfo();
     _loadMaps();
+    _loadAlphaWarningPreference();
   }
 
   Future<void> _loadBackupInfo() async {
@@ -55,6 +60,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) {
       setState(() {
         _maps = maps;
+      });
+    }
+  }
+
+  Future<void> _loadAlphaWarningPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    final enabled = prefs.getBool('alpha_warning_enabled') ?? true;
+    if (mounted) {
+      setState(() {
+        _alphaWarningEnabled = enabled;
+        _isLoadingAlphaWarningSetting = false;
+      });
+    }
+  }
+
+  Future<void> _updateAlphaWarningPreference(bool value) async {
+    if (_isSavingAlphaWarning) {
+      return;
+    }
+    setState(() {
+      _alphaWarningEnabled = value;
+      _isSavingAlphaWarning = true;
+    });
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('alpha_warning_enabled', value);
+    await prefs.setBool('alpha_warning_acknowledged', !value);
+
+    if (mounted) {
+      setState(() {
+        _isSavingAlphaWarning = false;
       });
     }
   }
@@ -1169,6 +1205,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               );
             },
+          ),
+          const SizedBox(height: 8),
+          Card(
+            elevation: 2,
+            child: SwitchListTile(
+              secondary:
+                  Icon(Icons.warning_amber_rounded, color: Colors.orange.shade700),
+              title: const Text('起動時のα版警告'),
+              subtitle: Text(
+                _isLoadingAlphaWarningSetting
+                    ? '設定を読み込み中です…'
+                    : _alphaWarningEnabled
+                        ? '次回起動時に注意ダイアログを表示します'
+                        : '注意ダイアログは表示されません',
+              ),
+              value: _alphaWarningEnabled,
+              onChanged: (_isLoadingAlphaWarningSetting || _isSavingAlphaWarning)
+                  ? null
+                  : (value) => _updateAlphaWarningPreference(value),
+            ),
           ),
           const SizedBox(height: 8),
           if (currentUser != null && !isOfflineMode) ...[
