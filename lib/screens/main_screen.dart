@@ -14,6 +14,8 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> {
+  static const _alphaWarningEnabledKey = 'alpha_warning_enabled';
+  static const _alphaWarningAcknowledgedKey = 'alpha_warning_acknowledged';
   int _currentIndex = 0;
 
   final List<Widget> _screens = [
@@ -38,15 +40,26 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _checkAndShowAlphaWarningDialog() async {
     final prefs = await SharedPreferences.getInstance();
-    final shouldShowDialog = prefs.getBool('show_alpha_warning') ?? true;
+    if (prefs.containsKey('show_alpha_warning')) {
+      final legacyValue = prefs.getBool('show_alpha_warning') ?? true;
+      await prefs.remove('show_alpha_warning');
+      await prefs.setBool(_alphaWarningEnabledKey, legacyValue);
+      if (!legacyValue) {
+        await prefs.setBool(_alphaWarningAcknowledgedKey, true);
+      }
+    }
 
-    if (shouldShowDialog) {
+    final isEnabled = prefs.getBool(_alphaWarningEnabledKey) ?? true;
+    final isAcknowledged =
+        prefs.getBool(_alphaWarningAcknowledgedKey) ?? false;
+
+    if (isEnabled && !isAcknowledged) {
       _showAlphaWarningDialog();
     }
   }
 
   void _showAlphaWarningDialog() {
-    bool dontShowAgain = false;
+    bool keepShowing = false;
 
     showDialog(
       context: context,
@@ -88,23 +101,19 @@ class _MainScreenState extends State<MainScreen> {
                     ),
                   ),
                   SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Checkbox(
-                        value: dontShowAgain,
-                        onChanged: (value) {
-                          setState(() {
-                            dontShowAgain = value ?? false;
-                          });
-                        },
-                      ),
-                      Expanded(
-                        child: Text(
-                          '次回から表示しない',
-                          style: TextStyle(fontSize: 14),
-                        ),
-                      ),
-                    ],
+                  CheckboxListTile(
+                    value: keepShowing,
+                    onChanged: (value) {
+                      setState(() {
+                        keepShowing = value ?? false;
+                      });
+                    },
+                    controlAffinity: ListTileControlAffinity.leading,
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                      '今後も起動時にこの警告を表示する',
+                      style: TextStyle(fontSize: 14),
+                    ),
                   ),
                 ],
               ),
@@ -113,7 +122,10 @@ class _MainScreenState extends State<MainScreen> {
                   onPressed: () async {
                     // 設定を保存
                     final prefs = await SharedPreferences.getInstance();
-                    await prefs.setBool('show_alpha_warning', !dontShowAgain);
+                    await prefs.setBool(
+                        _alphaWarningEnabledKey, keepShowing);
+                    await prefs.setBool(
+                        _alphaWarningAcknowledgedKey, !keepShowing);
 
                     Navigator.of(context).pop();
                   },
@@ -174,8 +186,8 @@ class _MainScreenState extends State<MainScreen> {
             unselectedItemColor:
                 Theme.of(context).bottomNavigationBarTheme.unselectedItemColor,
             // Web環境での高さ調整
-            selectedFontSize: kIsWeb ? 10 : 12,
-            unselectedFontSize: kIsWeb ? 10 : 12,
+            selectedFontSize: 12,
+            unselectedFontSize: 12,
             items: const [
               BottomNavigationBarItem(
                 icon: Icon(Icons.home),

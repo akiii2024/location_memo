@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -585,113 +586,132 @@ class _HomeScreenState extends State<HomeScreen> {
     await showDialog<void>(
       context: context,
       builder: (dialogContext) {
+        final mediaQuery = MediaQuery.of(dialogContext);
+        final maxDialogWidth = math.min(mediaQuery.size.width * 0.9, 420.0);
+        final maxDialogHeight = math.max(
+          200.0,
+          math.min(mediaQuery.size.height * 0.7, 360.0),
+        );
         return StatefulBuilder(
           builder: (dialogContext, setState) {
             return AlertDialog(
               title: const Text('オンライン地図'),
-              content: SizedBox(
-                width: 420,
-                child: FutureBuilder<List<FirebaseRemoteMapSummary>>(
-                  future: future,
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    if (snapshot.hasError) {
-                      return Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Text(
-                            '地図の取得に失敗しました: ${snapshot.error}',
-                            style: const TextStyle(color: Colors.red),
+              content: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: maxDialogWidth,
+                ),
+                child: SizedBox(
+                  width: maxDialogWidth,
+                  child: FutureBuilder<List<FirebaseRemoteMapSummary>>(
+                    future: future,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return SizedBox(
+                          height: maxDialogHeight,
+                          child: const Center(
+                            child: CircularProgressIndicator(),
                           ),
-                          const SizedBox(height: 12),
-                          OutlinedButton.icon(
-                            onPressed: () {
-                              setState(() {
-                                future = FirebaseMapService.instance
-                                    .fetchRemoteMaps();
-                              });
-                            },
-                            icon: const Icon(Icons.refresh),
-                            label: const Text('再試行'),
+                        );
+                      }
+                      if (snapshot.hasError) {
+                        return SizedBox(
+                          height: maxDialogHeight,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                '地図の取得に失敗しました: ${snapshot.error}',
+                                style: const TextStyle(color: Colors.red),
+                              ),
+                              const SizedBox(height: 12),
+                              OutlinedButton.icon(
+                                onPressed: () {
+                                  setState(() {
+                                    future = FirebaseMapService.instance
+                                        .fetchRemoteMaps();
+                                  });
+                                },
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('再試行'),
+                              ),
+                            ],
                           ),
-                        ],
-                      );
-                    }
-                    final summaries =
-                        snapshot.data ?? const <FirebaseRemoteMapSummary>[];
-                    if (summaries.isEmpty) {
-                      return const SizedBox(
-                        height: 200,
-                        child: Center(
-                          child: Text('オンラインに保存された地図はありません。'),
+                        );
+                      }
+                      final summaries =
+                          snapshot.data ?? const <FirebaseRemoteMapSummary>[];
+                      if (summaries.isEmpty) {
+                        return SizedBox(
+                          height: maxDialogHeight,
+                          child: const Center(
+                            child: Text('オンラインに保存された地図はありません。'),
+                          ),
+                        );
+                      }
+                      return SizedBox(
+                        height: maxDialogHeight,
+                        child: ListView.builder(
+                          itemCount: summaries.length,
+                          itemBuilder: (context, index) {
+                            final summary = summaries[index];
+                            final ownerLabel = summary.isShared
+                                ? '共有元: ${summary.ownerEmail ?? summary.ownerId}'
+                                : '所有者: ${summary.ownerEmail ?? '自分'}';
+                            final updatedLabel =
+                                '最終更新: ${_formatDateTime(summary.updatedAt)}';
+                            final memoLabel = 'メモ数: ${summary.memoCount}';
+                            final key =
+                                '${summary.ownerId}_${summary.mapId}_${summary.isShared}';
+                            final isProcessing = activeKey == key;
+                            final buttonLabel =
+                                summary.isShared ? 'インポート' : 'ダウンロード';
+                            return Card(
+                              margin: const EdgeInsets.symmetric(vertical: 6),
+                              child: ListTile(
+                                title: Text(summary.title),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(ownerLabel),
+                                    Text(memoLabel),
+                                    Text(updatedLabel),
+                                  ],
+                                ),
+                                trailing: TextButton(
+                                  onPressed: isProcessing
+                                      ? null
+                                      : () async {
+                                          setState(() {
+                                            activeKey = key;
+                                          });
+                                          await _handleRemoteDownload(
+                                            summary,
+                                            asImport: summary.isShared,
+                                          );
+                                          if (mounted) {
+                                            setState(() {
+                                              activeKey = null;
+                                            });
+                                          }
+                                        },
+                                  child: isProcessing
+                                      ? const SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2),
+                                        )
+                                      : Text(buttonLabel),
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       );
-                    }
-                    return SizedBox(
-                      height: 320,
-                      child: ListView.builder(
-                        itemCount: summaries.length,
-                        itemBuilder: (context, index) {
-                          final summary = summaries[index];
-                          final ownerLabel = summary.isShared
-                              ? '共有元: ${summary.ownerEmail ?? summary.ownerId}'
-                              : '所有者: ${summary.ownerEmail ?? '自分'}';
-                          final updatedLabel =
-                              '最終更新: ${_formatDateTime(summary.updatedAt)}';
-                          final memoLabel = 'メモ数: ${summary.memoCount}';
-                          final key =
-                              '${summary.ownerId}_${summary.mapId}_${summary.isShared}';
-                          final isProcessing = activeKey == key;
-                          final buttonLabel =
-                              summary.isShared ? 'インポート' : 'ダウンロード';
-                          return Card(
-                            margin: const EdgeInsets.symmetric(vertical: 6),
-                            child: ListTile(
-                              title: Text(summary.title),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(ownerLabel),
-                                  Text(memoLabel),
-                                  Text(updatedLabel),
-                                ],
-                              ),
-                              trailing: TextButton(
-                                onPressed: isProcessing
-                                    ? null
-                                    : () async {
-                                        setState(() {
-                                          activeKey = key;
-                                        });
-                                        await _handleRemoteDownload(
-                                          summary,
-                                          asImport: summary.isShared,
-                                        );
-                                        if (mounted) {
-                                          setState(() {
-                                            activeKey = null;
-                                          });
-                                        }
-                                      },
-                                child: isProcessing
-                                    ? const SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: CircularProgressIndicator(
-                                            strokeWidth: 2),
-                                      )
-                                    : Text(buttonLabel),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    );
-                  },
+                    },
+                  ),
                 ),
               ),
               actions: [
@@ -847,11 +867,6 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.cloud),
             tooltip: 'オンライン地図',
             onPressed: _showRemoteMapsDialog,
-          ),
-          IconButton(
-            icon: const Icon(Icons.add),
-            tooltip: '新しい地図を追加',
-            onPressed: _addNewMap,
           ),
         ],
       ),
