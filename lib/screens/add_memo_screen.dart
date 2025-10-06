@@ -224,8 +224,9 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
       );
     } finally {
       setState(() {
-      _isLocationLoading = false;
-    });
+        _isLocationLoading = false;
+      });
+    }
   }
 
   Future<void> _getCurrentLocation() async {
@@ -314,7 +315,6 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         });
       }
     }
-  }
   }
 
   Future<void> _selectDateTime() async {

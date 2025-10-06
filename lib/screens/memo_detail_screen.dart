@@ -157,8 +157,9 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
       );
     } finally {
       setState(() {
-      _isLocationLoading = false;
-    });
+        _isLocationLoading = false;
+      });
+    }
   }
 
   Future<void> _getCurrentLocation() async {
@@ -247,7 +248,6 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
         });
       }
     }
-  }
   }
 
   // ピン番号編集ダイアログを表示
