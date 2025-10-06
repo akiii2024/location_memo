@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode;
-// import 'package:geolocator/geolocator.dart';  // 一時的に無効化
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:geolocator/geolocator.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import '../models/memo.dart';
@@ -41,7 +41,10 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
   double? _latitude;
   double? _longitude;
+  double? _gpsLatitude;
+  double? _gpsLongitude;
   bool _isLocationLoading = false;
+  bool _isFetchingCurrentLocation = false;
   bool _isSaving = false;
   DateTime? _discoveryTime;
   String? _selectedCategory;
@@ -221,9 +224,97 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
       );
     } finally {
       setState(() {
-        _isLocationLoading = false;
+      _isLocationLoading = false;
+    });
+  }
+
+  Future<void> _getCurrentLocation() async {
+    setState(() {
+      _isFetchingCurrentLocation = true;
+    });
+
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('位置情報サービスが無効になっています。設定から有効にしてください'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('現在地の取得には位置情報の許可が必要です'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('位置情報の権限が永久に拒否されています。設定から許可してください'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      setState(() {
+        _gpsLatitude = position.latitude;
+        _gpsLongitude = position.longitude;
       });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '現在地を取得しました\n緯度: ${position.latitude.toStringAsFixed(6)}\n経度: ${position.longitude.toStringAsFixed(6)}',
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } on PermissionDefinitionsNotFoundException {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('位置情報の権限が正しく設定されていません。platforms/androidやiOSの設定を確認してください'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('現在地の取得に失敗しました: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isFetchingCurrentLocation = false;
+        });
+      }
     }
+  }
   }
 
   Future<void> _selectDateTime() async {
@@ -340,6 +431,8 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         layer: _layer, // レイヤー番号
         audioPath: _audioPath, // 音声ファイルのパス
         imagePaths: _imagePaths.isNotEmpty ? _imagePaths : null, // 画像パス配列
+        gpsLatitude: _gpsLatitude,
+        gpsLongitude: _gpsLongitude,
         // キノコ詳細情報（「選択してください」は保存しない）
         mushroomHabitat: _selectedMushroomHabitat == '選択してください'
             ? null
@@ -2051,24 +2144,46 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          '位置情報',
-                          style: TextStyle(fontWeight: FontWeight.bold),
+                        const Expanded(
+                          child: Text(
+                            '位置情報',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
                         ),
-                        ElevatedButton.icon(
-                          onPressed:
-                              _isLocationLoading ? null : _selectLocation,
-                          icon: _isLocationLoading
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.map),
-                          label: const Text('位置設定'),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            ElevatedButton.icon(
+                              onPressed:
+                                  _isLocationLoading ? null : _selectLocation,
+                              icon: _isLocationLoading
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    )
+                                  : const Icon(Icons.map),
+                              label: const Text('位置設定'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: _isFetchingCurrentLocation
+                                  ? null
+                                  : _getCurrentLocation,
+                              icon: _isFetchingCurrentLocation
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    )
+                                  : const Icon(Icons.my_location),
+                              label: const Text('現在地取得'),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -2081,6 +2196,17 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                     else
                       const Text(
                         '位置情報が設定されていません\n「位置設定」ボタンから地図で位置を選択してください',
+                        style: TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
+                    const SizedBox(height: 8.0),
+                    if (_gpsLatitude != null && _gpsLongitude != null)
+                      Text(
+                        'GPS現在地：\n緯度: ${_gpsLatitude!.toStringAsFixed(6)}\n経度: ${_gpsLongitude!.toStringAsFixed(6)}',
+                        style: const TextStyle(fontSize: 12),
+                      )
+                    else
+                      const Text(
+                        'GPSの現在地は未取得です\n「現在地取得」ボタンから位置情報の許可を与えてください',
                         style: TextStyle(color: Colors.grey, fontSize: 12),
                       ),
                   ],
@@ -2154,6 +2280,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                     '• 発見日時: ${_formatDateTime(_discoveryTime)}\n'
                     '• 発見者: ${_discovererController.text.trim().isEmpty ? "未入力" : _discovererController.text.trim()}\n'
                     '• 位置情報: ${_latitude != null && _longitude != null ? "設定済み" : "未設定"}\n'
+                    '• GPS現在地: ${_gpsLatitude != null && _gpsLongitude != null ? "取得済み" : "未取得"}\n'
                     '• 添付画像: ${_imagePaths.length}枚\n'
                     '• 音声メモ: ${_audioPath != null ? "録音済み (文字起こし可能)" : "なし"}${_selectedCategory == 'キノコ' ? _getMushroomDetailsSummary() : ""}',
                     style: TextStyle(

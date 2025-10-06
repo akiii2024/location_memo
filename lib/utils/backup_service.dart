@@ -478,6 +478,8 @@ class BackupService {
             audioPath: memo.audioPath,
             imagePaths: restoredImagePaths, // 復元された画像パスを設定
             layer: memo.layer, // レイヤー情報を復元
+            gpsLatitude: memo.gpsLatitude,
+            gpsLongitude: memo.gpsLongitude,
             // キノコ詳細情報も復元
             mushroomCapShape: memo.mushroomCapShape,
             mushroomCapColor: memo.mushroomCapColor,

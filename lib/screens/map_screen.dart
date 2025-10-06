@@ -926,6 +926,8 @@ class _MapScreenState extends State<MapScreen> {
             content: record['content']?.toString()?.trim() ?? '',
             latitude: record['latitude'],
             longitude: record['longitude'],
+            gpsLatitude: record['gpsLatitude'],
+            gpsLongitude: record['gpsLongitude'],
             discoveryTime: DateTime.now(), // 現在時刻をデフォルトとして使用
             discoverer: record['discoverer']?.toString()?.trim(),
             specimenNumber: record['specimenNumber']?.toString()?.trim(),

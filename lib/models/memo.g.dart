@@ -46,13 +46,15 @@ class MemoAdapter extends TypeAdapter<Memo> {
       mushroomHabitat: fields[26] as String?,
       mushroomGrowthPattern: fields[27] as String?,
       layer: fields[28] as int?,
+      gpsLatitude: fields[29] as double?,
+      gpsLongitude: fields[30] as double?,
     );
   }
 
   @override
   void write(BinaryWriter writer, Memo obj) {
     writer
-      ..writeByte(29)
+      ..writeByte(31)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -110,7 +112,11 @@ class MemoAdapter extends TypeAdapter<Memo> {
       ..writeByte(27)
       ..write(obj.mushroomGrowthPattern)
       ..writeByte(28)
-      ..write(obj.layer);
+      ..write(obj.layer)
+      ..writeByte(29)
+      ..write(obj.gpsLatitude)
+      ..writeByte(30)
+      ..write(obj.gpsLongitude);
   }
 
   @override

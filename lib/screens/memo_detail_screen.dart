@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import '../models/memo.dart';
 import '../models/map_info.dart';
 import '../utils/database_helper.dart';
@@ -29,6 +30,9 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
   double? _editingLatitude;
   double? _editingLongitude;
   bool _isLocationLoading = false;
+  double? _gpsLatitude;
+  double? _gpsLongitude;
+  bool _isFetchingCurrentLocation = false;
 
   final List<String> _categories = [
     'カテゴリを選択してください',
@@ -63,6 +67,8 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
     // 編集用位置情報を初期化
     _editingLatitude = widget.memo.latitude;
     _editingLongitude = widget.memo.longitude;
+    _gpsLatitude = widget.memo.gpsLatitude;
+    _gpsLongitude = widget.memo.gpsLongitude;
   }
 
   Future<void> _selectDateTime() async {
@@ -151,9 +157,97 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
       );
     } finally {
       setState(() {
-        _isLocationLoading = false;
+      _isLocationLoading = false;
+    });
+  }
+
+  Future<void> _getCurrentLocation() async {
+    setState(() {
+      _isFetchingCurrentLocation = true;
+    });
+
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('位置情報サービスが無効になっています。設定から有効にしてください'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('現在地の取得には位置情報の許可が必要です'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('位置情報の権限が永久に拒否されています。設定から許可してください'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      setState(() {
+        _gpsLatitude = position.latitude;
+        _gpsLongitude = position.longitude;
       });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '現在地を取得しました\n緯度: ${position.latitude.toStringAsFixed(6)}\n経度: ${position.longitude.toStringAsFixed(6)}',
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } on PermissionDefinitionsNotFoundException {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('位置情報の権限が正しく設定されていません。各プラットフォームの設定を確認してください'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('現在地の取得に失敗しました: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isFetchingCurrentLocation = false;
+        });
+      }
     }
+  }
   }
 
   // ピン番号編集ダイアログを表示
@@ -205,6 +299,9 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                     category: widget.memo.category,
                     notes: widget.memo.notes,
                     pinNumber: newNumber,
+                    mapId: widget.memo.mapId,
+                    gpsLatitude: widget.memo.gpsLatitude,
+                    gpsLongitude: widget.memo.gpsLongitude,
                   );
 
                   await DatabaseHelper.instance.update(updatedMemo);
@@ -524,8 +621,9 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
           ],
 
           // 位置情報
-          if (widget.memo.latitude != null &&
-              widget.memo.longitude != null) ...[
+          if ((widget.memo.latitude != null && widget.memo.longitude != null) ||
+              (widget.memo.gpsLatitude != null &&
+                  widget.memo.gpsLongitude != null)) ...[
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
@@ -536,15 +634,50 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                         style: TextStyle(
                             fontWeight: FontWeight.bold, color: Colors.grey)),
                     const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        const Icon(Icons.location_on,
-                            size: 16, color: Colors.grey),
-                        const SizedBox(width: 8),
-                        Text(
-                            '緯度: ${widget.memo.latitude!.toStringAsFixed(6)}\n経度: ${widget.memo.longitude!.toStringAsFixed(6)}'),
-                      ],
-                    ),
+                    if (widget.memo.latitude != null &&
+                        widget.memo.longitude != null)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.location_on,
+                              size: 16, color: Colors.grey),
+                          const SizedBox(width: 8),
+                          Text(
+                            '地図上の位置\n緯度: ${widget.memo.latitude!.toStringAsFixed(6)}\n経度: ${widget.memo.longitude!.toStringAsFixed(6)}',
+                          ),
+                        ],
+                      )
+                    else
+                      Row(
+                        children: const [
+                          Icon(Icons.location_off,
+                              size: 16, color: Colors.grey),
+                          SizedBox(width: 8),
+                          Text('地図上の位置は未設定です'),
+                        ],
+                      ),
+                    const SizedBox(height: 8),
+                    if (widget.memo.gpsLatitude != null &&
+                        widget.memo.gpsLongitude != null)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.my_location,
+                              size: 16, color: Colors.grey),
+                          const SizedBox(width: 8),
+                          Text(
+                            'GPS現在地\n緯度: ${widget.memo.gpsLatitude!.toStringAsFixed(6)}\n経度: ${widget.memo.gpsLongitude!.toStringAsFixed(6)}',
+                          ),
+                        ],
+                      )
+                    else
+                      Row(
+                        children: const [
+                          Icon(Icons.gps_off, size: 16, color: Colors.grey),
+                          SizedBox(width: 8),
+                          Text('GPSの現在地は未取得です'),
+                        ],
+                      ),
                   ],
                 ),
               ),
@@ -777,27 +910,50 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        '位置情報',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      ElevatedButton.icon(
-                        onPressed: _isLocationLoading ? null : _selectLocation,
-                        icon: _isLocationLoading
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.map),
-                        label: const Text('位置編集'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
-                          foregroundColor: Colors.white,
+                      const Expanded(
+                        child: Text(
+                          '位置情報',
+                          style: TextStyle(fontWeight: FontWeight.bold),
                         ),
+                      ),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          ElevatedButton.icon(
+                            onPressed:
+                                _isLocationLoading ? null : _selectLocation,
+                            icon: _isLocationLoading
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.map),
+                            label: const Text('位置編集'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue,
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _isFetchingCurrentLocation
+                                ? null
+                                : _getCurrentLocation,
+                            icon: _isFetchingCurrentLocation
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.my_location),
+                            label: const Text('現在地取得'),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -810,6 +966,17 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                   else
                     const Text(
                       '位置情報が設定されていません\n「位置編集」ボタンから地図で位置を選択してください',
+                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                  const SizedBox(height: 8),
+                  if (_gpsLatitude != null && _gpsLongitude != null)
+                    Text(
+                      'GPS現在地：\n緯度: ${_gpsLatitude!.toStringAsFixed(6)}\n経度: ${_gpsLongitude!.toStringAsFixed(6)}',
+                      style: const TextStyle(fontSize: 12),
+                    )
+                  else
+                    const Text(
+                      'GPSの現在地は未取得です\n「現在地取得」ボタンから位置情報の許可を与えてください',
                       style: TextStyle(color: Colors.grey, fontSize: 12),
                     ),
                 ],
@@ -853,6 +1020,8 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                   mapId: widget.memo.mapId, // 地図IDを保持
                   audioPath: widget.memo.audioPath, // 音声パスを保持
                   imagePaths: widget.memo.imagePaths, // 画像パスを保持
+                  gpsLatitude: _gpsLatitude,
+                  gpsLongitude: _gpsLongitude,
                 );
 
                 await DatabaseHelper.instance.update(updatedMemo);
@@ -902,6 +1071,8 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                   // 編集用位置情報もリセット
                   _editingLatitude = widget.memo.latitude;
                   _editingLongitude = widget.memo.longitude;
+                  _gpsLatitude = widget.memo.gpsLatitude;
+                  _gpsLongitude = widget.memo.gpsLongitude;
                 });
               },
             ),
