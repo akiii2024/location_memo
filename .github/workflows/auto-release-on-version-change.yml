@@ -1,0 +1,101 @@
+name: Auto Release on Version Change
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  detect-and-release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get current version from pubspec.yaml
+        id: current
+        run: |
+          ver=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          echo "version=$ver" >> $GITHUB_OUTPUT
+
+      - name: Get previous pubspec.yaml
+        id: prev
+        run: |
+          base=$(git rev-parse HEAD^)
+          git show $base:pubspec.yaml > /tmp/pubspec_prev.yaml || true
+          if [ -s /tmp/pubspec_prev.yaml ]; then
+            prev=$(grep '^version:' /tmp/pubspec_prev.yaml | awk '{print $2}')
+            echo "version=$prev" >> $GITHUB_OUTPUT
+          else
+            echo "version=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if version changed
+        id: diff
+        run: |
+          if [ "${{ steps.current.outputs.version }}" != "${{ steps.prev.outputs.version }}" ] && [ -n "${{ steps.current.outputs.version }}" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Java
+        if: steps.diff.outputs.changed == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        if: steps.diff.outputs.changed == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: stable
+          cache: true
+
+      - name: Restore Firebase config (optional)
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          if [ -n "${{ secrets.FIREBASE_CONFIG }}" ]; then
+            echo '${{ secrets.FIREBASE_CONFIG }}' > android/app/google-services.json
+          fi
+
+      - name: Flutter pub get
+        if: steps.diff.outputs.changed == 'true'
+        run: flutter pub get
+
+      - name: Build APK & AAB
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          flutter build apk --release
+          flutter build appbundle --release
+
+      - name: Create tag
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          tag=v${{ steps.current.outputs.version }}
+          git tag "$tag"
+          git push origin "$tag"
+
+      - name: Create GitHub Release
+        if: steps.diff.outputs.changed == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.current.outputs.version }}
+          name: Release v${{ steps.current.outputs.version }}
+          body: |
+            自動生成されたリリースです。
+
+            - バージョン: ${{ steps.current.outputs.version }}
+            - 変更はコミット履歴を参照してください。
+          files: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/bundle/release/app-release.aab
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

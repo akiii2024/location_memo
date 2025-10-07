@@ -166,3 +166,7 @@ debug.log
 
 # Documentation
 docs/
+
+#android release key
+android/key.properties
+android/app/release.keystore
