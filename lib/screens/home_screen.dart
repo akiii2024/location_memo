@@ -12,6 +12,7 @@ import '../utils/firebase_map_service.dart';
 import 'add_map_screen.dart';
 import 'auth_screen.dart';
 import 'map_screen.dart';
+import 'map_share_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -573,6 +574,43 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _showShareLinkScreen(MapInfo mapInfo) async {
+    if (mapInfo.id == null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('地図が保存されていません')),
+      );
+      return;
+    }
+    if (!await _ensureLoggedIn()) {
+      return;
+    }
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('共有するにはログインが必要です')),
+      );
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => MapShareScreen(
+          mapInfo: mapInfo,
+          ownerUid: currentUser.uid,
+        ),
+      ),
+    );
+  }
+
   Future<void> _showRemoteMapsDialog() async {
     if (!await _ensureLoggedIn()) {
       return;
@@ -812,6 +850,15 @@ class _HomeScreenState extends State<HomeScreen> {
                 onTap: () async {
                   Navigator.pop(context);
                   await _showShareDialog(mapInfo);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.qr_code),
+                title: const Text('リンク・QRコードで共有'),
+                enabled: mapInfo.id != null,
+                onTap: () async {
+                  Navigator.pop(context);
+                  await _showShareLinkScreen(mapInfo);
                 },
               ),
               ListTile(

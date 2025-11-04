@@ -18,6 +18,8 @@ import '../widgets/custom_map_widget.dart';
 import 'memo_detail_screen.dart';
 import 'memo_list_screen.dart';
 import 'add_memo_screen.dart';
+import 'map_share_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class MapScreen extends StatefulWidget {
   final MapInfo? mapInfo;
@@ -517,6 +519,35 @@ class _MapScreenState extends State<MapScreen> {
       const SnackBar(content: Text('共同編集を無効にしました')),
     );
     unawaited(_loadMemos());
+  }
+
+  Future<void> _showShareLinkScreen() async {
+    final mapInfo = widget.mapInfo;
+    if (mapInfo?.id == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('地図が保存されていません')),
+      );
+      return;
+    }
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('共有するにはログインが必要です')),
+      );
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => MapShareScreen(
+          mapInfo: mapInfo!,
+          ownerUid: currentUser.uid,
+        ),
+      ),
+    );
   }
 
   Widget _buildCollaborationBanner(BuildContext context) {
@@ -1085,6 +1116,9 @@ class _MapScreenState extends State<MapScreen> {
                   case 'disable_collaboration':
                     await _disableCollaboration();
                     break;
+                  case 'share_link':
+                    await _showShareLinkScreen();
+                    break;
                   case 'upload_map':
                     await _uploadMapToFirebase();
                     break;
@@ -1187,6 +1221,22 @@ class _MapScreenState extends State<MapScreen> {
                     ],
                   ),
                 ),
+              PopupMenuItem(
+                value: 'share_link',
+                enabled: widget.mapInfo?.id != null,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.qr_code,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white
+                          : Colors.black,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('リンク・QRコードで共有'),
+                  ],
+                ),
+              ),
               const PopupMenuDivider(),
               PopupMenuItem(
                 value: 'upload_map',

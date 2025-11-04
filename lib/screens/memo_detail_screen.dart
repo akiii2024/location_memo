@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show debugPrint, debugPrintStack;
 import '../models/memo.dart';
 import '../models/map_info.dart';
 import '../utils/database_helper.dart';
@@ -856,6 +857,19 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                 );
 
                 await DatabaseHelper.instance.update(updatedMemo);
+                try {
+                  await CollaborationSyncCoordinator.instance
+                      .onLocalMemoUpdated(updatedMemo);
+                } catch (error, stackTrace) {
+                  debugPrint('Failed to sync memo update: $error');
+                  debugPrintStack(stackTrace: stackTrace);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('共同編集への同期に失敗しました: $error'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                }
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('記録を更新しました')),
                 );
