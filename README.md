@@ -3,8 +3,10 @@
 フィールドワーク等野外調査の記録を効率化するメモアプリです。
 画像として取り込んだ地図状にピンを置いてメモを作成します。ピンには文字だけでなく、写真や音声を添付することができます。
 
-- マップ画面スクショ置き場
-- メモ入力画面スクショ置き場
+<div align="center">
+  <img src="images/map_screen.png" alt="マップ画面" width="300">
+  <img src="images/add_pin_screen.png" alt="メモ入力画面" width="300">
+</div>
 
 ## できること
 
@@ -30,13 +32,16 @@
 
 ログイン後、ホーム画面の「＋地図」から地図画像をアップロード
 
-!地図一覧
+<div align="center">
+  <img src="images/home_screen.png" alt="地図一覧" width="300">
+  <img src="images/add_map_screen.png" alt="地図追加画面" width="300">
+</div>
 
 2. ピンを配置してメモ作成
 
 地図を開き、記録したい位置をタップ。タイトルや詳細情報、写真・音声を登録
 
-!メモ作成
+![メモ作成](images/add_pin_screen.png)
 
 3. AIアシストやPDF出力を活用
 
@@ -92,6 +97,6 @@
 
 ### 動作確認環境
  以下の環境でテストを行っています。
- - Samsung Galaxy s24
- - Pixel 10 Pro
- - iPhone 15 Pro Max
+ - Samsung Galaxy S24 - Android 16 One UI 8.0
+ - Google Pixel 10 Pro - Android 16
+ - iPhone 15 Pro Max - iOS 17.5.1
