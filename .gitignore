@@ -10,6 +10,21 @@
 .svn/
 migrate_working_dir/
 
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
 # Editor backup files
 *~
 *.bak
@@ -24,7 +39,10 @@ migrate_working_dir/
 # The .vscode folder contains launch configuration and tasks you configure in
 # VS Code which you may wish to be included in version control, so this line
 # is commented out by default.
-#.vscode/
+.vscode/
+
+# Cursor editor
+.cursor/
 
 # Flutter/Dart/Pub related
 **/doc/api/
@@ -166,6 +184,12 @@ debug.log
 
 # Documentation
 docs/
+# 技術ドキュメントは管理対象に含める
+!docs/technical/
+
+# Personal memos (個人メモ)
+memo.md
+README_old.md
 
 #android release key
 android/key.properties
