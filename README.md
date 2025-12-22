@@ -3,7 +3,7 @@
 フィールドワーク等野外調査の記録を効率化するメモアプリです。
 画像として取り込んだ地図状にピンを置いてメモを作成します。ピンには文字だけでなく、写真や音声を添付することができます。
 
-<div align="center">
+<div align="left">
   <img src="images/map_screen.png" alt="マップ画面" width="250">
   <img src="images/add_pin_screen.png" alt="メモ入力画面" width="250">
 </div>
@@ -32,7 +32,7 @@
 
 ログイン後、ホーム画面の「＋地図」から地図画像をアップロード
 
-<div align="center">
+<div align="left">
   <img src="images/home_screen.png" alt="地図一覧" width="250">
   <img src="images/add_map_screen.png" alt="地図追加画面" width="250">
 </div>
@@ -41,7 +41,9 @@
 
 地図を開き、記録したい位置をタップ。タイトルや詳細情報、写真・音声を登録
 
-<img src="images/add_pin_screen.png" alt="メモ作成" width="250">
+<div align="left">
+  <img src="images/add_pin_screen.png" alt="メモ作成" width="250">
+</div>
 
 3. AIアシストやPDF出力を活用
 
