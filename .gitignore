@@ -70,6 +70,7 @@ app.*.map.json
 **/android/.gradle/
 **/android/local.properties
 **/android/key.properties
+**/android/build/
 
 # iOS related
 **/ios/**/*.mode1v3
