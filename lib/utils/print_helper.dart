@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -17,7 +18,32 @@ import 'web_print_helper_stub.dart'
 
 import '../models/memo.dart';
 
+class _PreparedMemoPrintItem {
+  const _PreparedMemoPrintItem({
+    required this.widget,
+    required this.estimatedHeight,
+  });
+
+  final pw.Widget widget;
+  final double estimatedHeight;
+}
+
+class _PreparedMemoImageRow {
+  const _PreparedMemoImageRow({
+    required this.height,
+  });
+
+  final double height;
+}
+
 class PrintHelper {
+  static const double _memoItemPadding = 10.0;
+  static const double _memoItemBottomMargin = 15.0;
+  static const double _memoImageMinHeight = 80.0;
+  static const double _memoImageMaxHeight = 150.0;
+  static const double _memoImageTargetWidth = 200.0;
+  static const double _memoEstimatedTextWidth = 515.0;
+
   // Web版対応: 画像パスが有効かどうかをチェック
   static bool _isValidImagePath(String? imagePath) {
     if (imagePath == null || imagePath.isEmpty) return false;
@@ -500,8 +526,8 @@ class PrintHelper {
     // メモ一覧ページを追加
     if (memos.isNotEmpty) {
       // 非同期でメモアイテムを構築
-      final memoWidgets = await Future.wait(
-        memos.map((memo) => _buildMemoItem(memo, font, boldFont)).toList(),
+      final memoItems = await Future.wait(
+        memos.map((memo) => _prepareMemoItem(memo, font, boldFont)).toList(),
       );
 
       pdf.addPage(
@@ -509,14 +535,22 @@ class PrintHelper {
           pageFormat: PdfPageFormat.a4,
           margin: const pw.EdgeInsets.all(20),
           build: (pw.Context context) {
-            return [
+            final widgets = <pw.Widget>[
               pw.Text(
                 '記録一覧',
                 style: _createTextStyle(boldFont, 18),
               ),
               pw.SizedBox(height: 20),
-              ...memoWidgets,
             ];
+            for (final memoItem in memoItems) {
+              widgets.add(
+                pw.NewPage(
+                  freeSpace: _memoPageBreakThreshold(memoItem.estimatedHeight),
+                ),
+              );
+              widgets.add(memoItem.widget);
+            }
+            return widgets;
           },
         ),
       );
@@ -757,8 +791,8 @@ class PrintHelper {
     }
 
     return pw.Container(
-      margin: const pw.EdgeInsets.only(bottom: 15),
-      padding: const pw.EdgeInsets.all(10),
+      margin: const pw.EdgeInsets.only(bottom: _memoItemBottomMargin),
+      padding: const pw.EdgeInsets.all(_memoItemPadding),
       decoration: pw.BoxDecoration(
         border: pw.Border.all(color: PdfColors.grey400),
         borderRadius: pw.BorderRadius.circular(5),
@@ -768,6 +802,127 @@ class PrintHelper {
         children: children,
       ),
     );
+  }
+
+  static Future<_PreparedMemoPrintItem> _prepareMemoItem(
+      Memo memo, pw.Font font, pw.Font boldFont) async {
+    final imageRows = memo.imagePaths != null && memo.imagePaths!.isNotEmpty
+        ? await _prepareMemoImageRows(memo.imagePaths!)
+        : const <_PreparedMemoImageRow>[];
+
+    return _PreparedMemoPrintItem(
+      widget: await _buildMemoItem(memo, font, boldFont),
+      estimatedHeight: _estimateMemoItemHeight(memo, imageRows),
+    );
+  }
+
+  static Future<List<_PreparedMemoImageRow>> _prepareMemoImageRows(
+      List<String> imagePaths) async {
+    final rows = <_PreparedMemoImageRow>[];
+
+    for (int i = 0; i < imagePaths.length; i += 2) {
+      double firstHeight = _memoImageMinHeight;
+      double secondHeight = _memoImageMinHeight;
+
+      try {
+        final firstImageBytes = await _loadImageBytes(imagePaths[i]);
+        firstHeight = await _calculateMemoImageHeight(firstImageBytes);
+      } catch (_) {
+        firstHeight = _memoImageMinHeight;
+      }
+
+      if (i + 1 < imagePaths.length) {
+        try {
+          final secondImageBytes = await _loadImageBytes(imagePaths[i + 1]);
+          secondHeight = await _calculateMemoImageHeight(secondImageBytes);
+        } catch (_) {
+          secondHeight = _memoImageMinHeight;
+        }
+      }
+
+      rows.add(
+        _PreparedMemoImageRow(
+          height: math.max(firstHeight, secondHeight),
+        ),
+      );
+    }
+
+    return rows;
+  }
+
+  static Future<double> _calculateMemoImageHeight(Uint8List imageBytes) async {
+    final image = await decodeImageFromList(imageBytes);
+    final aspectRatio = image.width / image.height;
+    final calculatedHeight = _memoImageTargetWidth / aspectRatio;
+
+    return calculatedHeight.clamp(_memoImageMinHeight, _memoImageMaxHeight);
+  }
+
+  static double _estimateMemoItemHeight(
+      Memo memo, List<_PreparedMemoImageRow> imageRows) {
+    double height = (_memoItemPadding * 2) + _memoItemBottomMargin;
+
+    height += _estimateTextHeight(memo.title, 14);
+    height += 5;
+
+    if (memo.category != null || memo.discoveryTime != null) {
+      height += _singleLineHeight(10);
+    }
+
+    if (memo.discoverer != null || memo.specimenNumber != null) {
+      height += 3;
+      height += _singleLineHeight(10);
+    }
+
+    if (memo.content.isNotEmpty) {
+      height += 8;
+      height += _estimateTextHeight(memo.content, 11);
+    }
+
+    if (memo.notes != null && memo.notes!.isNotEmpty) {
+      height += 5;
+      height += _estimateTextHeight(memo.notes!, 10);
+    }
+
+    if (memo.latitude != null && memo.longitude != null) {
+      height += 5;
+      height += _singleLineHeight(9);
+    }
+
+    if (imageRows.isNotEmpty) {
+      height += 8;
+      height += _singleLineHeight(10);
+      height += 5;
+
+      for (int i = 0; i < imageRows.length; i++) {
+        height += imageRows[i].height;
+        if (i < imageRows.length - 1) {
+          height += 5;
+        }
+      }
+    }
+
+    return height + 12;
+  }
+
+  static double _estimateTextHeight(String text, double fontSize) {
+    final normalized = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    final charsPerLine =
+        math.max(1, (_memoEstimatedTextWidth / fontSize).floor());
+
+    int wrappedLines = 0;
+    for (final line in normalized.split('\n')) {
+      wrappedLines += math.max(1, (line.length / charsPerLine).ceil());
+    }
+
+    return wrappedLines * _singleLineHeight(fontSize);
+  }
+
+  static double _singleLineHeight(double fontSize) => fontSize * 1.35;
+
+  static double _memoPageBreakThreshold(double estimatedHeight) {
+    final printableHeight = PdfPageFormat.a4.height - 40;
+    return estimatedHeight.clamp(0.0, printableHeight - 1);
   }
 
   static String _formatDateTime(DateTime dateTime) {
@@ -842,8 +997,8 @@ class PrintHelper {
       // メモ一覧ページを追加
       if (memos.isNotEmpty) {
         // 非同期でメモアイテムを構築
-        final memoWidgets = await Future.wait(
-          memos.map((memo) => _buildMemoItem(memo, font, boldFont)).toList(),
+        final memoItems = await Future.wait(
+          memos.map((memo) => _prepareMemoItem(memo, font, boldFont)).toList(),
         );
 
         pdf.addPage(
@@ -851,14 +1006,22 @@ class PrintHelper {
             pageFormat: PdfPageFormat.a4,
             margin: const pw.EdgeInsets.all(20),
             build: (pw.Context context) {
-              return [
+              final widgets = <pw.Widget>[
                 pw.Text(
                   '記録一覧',
                   style: _createTextStyle(boldFont, 18),
                 ),
                 pw.SizedBox(height: 20),
-                ...memoWidgets,
               ];
+              for (final memoItem in memoItems) {
+                widgets.add(
+                  pw.NewPage(
+                    freeSpace: _memoPageBreakThreshold(memoItem.estimatedHeight),
+                  ),
+                );
+                widgets.add(memoItem.widget);
+              }
+              return widgets;
             },
           ),
         );
