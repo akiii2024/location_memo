@@ -89,11 +89,11 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
+            VALUE "CompanyName", "com.aki" "\0"
             VALUE "FileDescription", "location_memo" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "location_memo" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2025 com.example. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2025 com.aki. All rights reserved." "\0"
             VALUE "OriginalFilename", "location_memo.exe" "\0"
             VALUE "ProductName", "location_memo" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

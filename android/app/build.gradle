@@ -30,7 +30,7 @@ if (flutterVersionName == null) {
 }
 
 android {
-    namespace = "com.example.location_memo"
+    namespace = "com.aki.location_memo"
     compileSdkVersion 36
     ndkVersion = "27.0.12077973"
 
@@ -48,7 +48,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.location_memo"
+        applicationId = "com.aki.location_memo"
         minSdkVersion 24
         targetSdkVersion 36
         versionCode = flutterVersionCode.toInteger()

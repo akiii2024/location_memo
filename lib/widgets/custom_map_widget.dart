@@ -36,6 +36,7 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
   String? _mapImagePath;
   final TransformationController _transformationController =
       TransformationController();
+  final GlobalKey _mapViewportKey = GlobalKey();
   double _mapWidth = 800.0;
   double _mapHeight = 600.0;
   double _actualDisplayWidth = 800.0;
@@ -59,6 +60,24 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
   }
 
   // スケール変更時のコールバック
+  @override
+  void didUpdateWidget(covariant CustomMapWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.customImagePath != widget.customImagePath) {
+      if (widget.customImagePath != null) {
+        setState(() {
+          _mapImagePath = widget.customImagePath;
+        });
+      } else {
+        setState(() {
+          _mapImagePath = null;
+        });
+        _loadSavedMapImage();
+      }
+    }
+  }
+
   void _onTransformChanged() {
     final Matrix4 matrix = _transformationController.value;
     final double newScale = matrix.getMaxScaleOnAxis();
@@ -239,6 +258,26 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
     }
   }
 
+  void _handleMapTap(Offset localPosition) {
+    if (localPosition.dx < _offsetX ||
+        localPosition.dx > _offsetX + _actualDisplayWidth ||
+        localPosition.dy < _offsetY ||
+        localPosition.dy > _offsetY + _actualDisplayHeight) {
+      return;
+    }
+
+    final double relativeX = (localPosition.dx - _offsetX) / _actualDisplayWidth;
+    final double relativeY =
+        (localPosition.dy - _offsetY) / _actualDisplayHeight;
+
+    if (relativeX >= 0.0 &&
+        relativeX <= 1.0 &&
+        relativeY >= 0.0 &&
+        relativeY <= 1.0) {
+      widget.onTap(relativeX, relativeY);
+    }
+  }
+
   Widget _buildMapContent() {
     if (_mapImagePath == null) {
       return Container(
@@ -297,48 +336,9 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
       child: GestureDetector(
         // iOS PWA タッチ反応問題を解決するため、タッチ動作を最適化
         behavior: HitTestBehavior.opaque,
-        onTapDown: (details) {
-          // タップ位置を地図座標に変換
-          final RenderBox renderBox = context.findRenderObject() as RenderBox;
-          final localPosition = renderBox.globalToLocal(details.globalPosition);
-
-          // まず、タップ位置が画像表示領域内かどうかを確認
-          if (localPosition.dx < _offsetX ||
-              localPosition.dx > _offsetX + _actualDisplayWidth ||
-              localPosition.dy < _offsetY ||
-              localPosition.dy > _offsetY + _actualDisplayHeight) {
-            return; // 画像外のタップは無視
-          }
-
-          // 画像表示領域内の相対座標を計算（ズーム・パン変換前）
-          final Offset imageLocalPosition = Offset(
-            localPosition.dx - _offsetX,
-            localPosition.dy - _offsetY,
-          );
-
-          // InteractiveViewerの変換を適用
-          final Matrix4 matrix = _transformationController.value;
-          final Matrix4? invertedMatrix = Matrix4.tryInvert(matrix);
-          if (invertedMatrix == null) return;
-
-          // 画像表示領域を基準とした座標で変換
-          final Offset transformedPosition = MatrixUtils.transformPoint(
-            invertedMatrix,
-            imageLocalPosition,
-          );
-
-          // 相対座標（0.0〜1.0）に変換
-          final double relativeX = transformedPosition.dx / _actualDisplayWidth;
-          final double relativeY =
-              transformedPosition.dy / _actualDisplayHeight;
-
-          // 範囲チェック - 正規化座標が有効範囲内かを確認
-          if (relativeX >= 0.0 &&
-              relativeX <= 1.0 &&
-              relativeY >= 0.0 &&
-              relativeY <= 1.0) {
-            widget.onTap(relativeX, relativeY);
-          }
+        onTapUp: (details) {
+          // localPosition is already reported in the transformed child space.
+          _handleMapTap(details.localPosition);
         },
         child: Container(
           width: _mapWidth,
@@ -421,7 +421,7 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
 
                           return Positioned(
                             left: pinX - pinSize / 2,
-                            top: pinY - pinSize,
+                            top: pinY - pinSize / 2,
                             child: GestureDetector(
                               // iOS PWA タッチ反応問題を解決するため、タッチ動作を最適化
                               behavior: HitTestBehavior.opaque,
@@ -677,7 +677,9 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
     final double scaleChange = scale / _currentScale;
 
     // ビューポートのサイズを取得
-    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+    final renderObject = _mapViewportKey.currentContext?.findRenderObject();
+    final RenderBox? renderBox =
+        renderObject is RenderBox ? renderObject : null;
     if (renderBox == null) return;
 
     final Size viewportSize = renderBox.size;
@@ -767,6 +769,7 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
         // 地図表示エリア
         Expanded(
           child: Container(
+            key: _mapViewportKey,
             width: double.infinity,
             child: _buildMapContent(),
           ),
