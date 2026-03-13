@@ -21,8 +21,8 @@
 | プラットフォーム|配布方法| 備考|
 |---------------|---------------|---------------|
 |Android|APK or PWA             |将来的にGoogle Playに公開予定 |
-|iOS|PWA（https://akiii2024.github.io/location_memo/） |ipa配布予定、将来的にApp Storeに公開予定|
-|Web|PWA（https://akiii2024.github.io/location_memo/） |オフライン動作対応|
+|iOS|PWA（<https://akiii2024.github.io/location_memo/>） |ipa配布予定、将来的にApp Storeに公開予定|
+|Web|PWA（<https://akiii2024.github.io/location_memo/>） |オフライン動作対応|
 
 ## インストール方法
 [インストールガイド](https://akiii2024.github.io/location_memo_guide/)を参照してください。アクセスするデバイスにより最適な方法が表示されます。
