@@ -3,20 +3,26 @@ import 'package:path/path.dart';
 import '../models/memo.dart';
 import '../models/map_info.dart';
 import 'package:flutter/foundation.dart';
-import 'package:hive/hive.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:uuid/uuid.dart';
+import 'local_data_repository.dart';
 
-class DatabaseHelper {
+class DatabaseHelper implements LocalDataRepository {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
   static Box<MapInfo>? _mapBox;
   static Box<Memo>? _memoBox;
+  static const Uuid _uuid = Uuid();
+  static const _restoreStateBoxName = 'local_restore_state_v2';
+  static const _restoreMapsBoxName = 'local_restore_maps_v2';
+  static const _restoreMemosBoxName = 'local_restore_memos_v2';
 
   DatabaseHelper._init();
 
+  @override
   Future<void> init() async {
+    await Hive.initFlutter();
     if (kIsWeb) {
-      await Hive.initFlutter();
       // Hiveアダプターの登録（partファイルから自動的に利用可能）
       if (!Hive.isAdapterRegistered(0)) {
         Hive.registerAdapter(MapInfoAdapter());
@@ -24,9 +30,135 @@ class DatabaseHelper {
       if (!Hive.isAdapterRegistered(1)) {
         Hive.registerAdapter(MemoAdapter());
       }
-      _mapBox = await Hive.openBox<MapInfo>('maps');
-      _memoBox = await Hive.openBox<Memo>('memos');
+      _mapBox ??= await Hive.openBox<MapInfo>('maps');
+      _memoBox ??= await Hive.openBox<Memo>('memos');
+      await _recoverInterruptedHiveMutation();
+      await _backfillHiveSyncMetadata();
     }
+  }
+
+  Future<void> _recoverInterruptedHiveMutation() async {
+    final state = await Hive.openBox<dynamic>(_restoreStateBoxName);
+    final journal = state.get('journal');
+    if (journal is! Map || journal['phase'] != 'applying') return;
+
+    final backupMaps = await Hive.openBox<MapInfo>(_restoreMapsBoxName);
+    final backupMemos = await Hive.openBox<Memo>(_restoreMemosBoxName);
+    final expectedMaps = (journal['mapCount'] as num?)?.toInt();
+    final expectedMemos = (journal['memoCount'] as num?)?.toInt();
+    if (expectedMaps == null ||
+        expectedMemos == null ||
+        backupMaps.length != expectedMaps ||
+        backupMemos.length != expectedMemos) {
+      // 不完全なジャーナルで正常なライブデータを上書きしない。
+      await state.delete('journal');
+      return;
+    }
+
+    await _mapBox!.clear();
+    await _memoBox!.clear();
+    await _mapBox!.putAll(backupMaps.toMap());
+    await _memoBox!.putAll(backupMemos.toMap());
+    await state.delete('journal');
+    await backupMaps.clear();
+    await backupMemos.clear();
+  }
+
+  Future<void> _beginHiveMutationJournal(
+    Map<dynamic, MapInfo> maps,
+    Map<dynamic, Memo> memos,
+  ) async {
+    final backupMaps = await Hive.openBox<MapInfo>(_restoreMapsBoxName);
+    final backupMemos = await Hive.openBox<Memo>(_restoreMemosBoxName);
+    final state = await Hive.openBox<dynamic>(_restoreStateBoxName);
+    await backupMaps.clear();
+    await backupMemos.clear();
+    await backupMaps.putAll(maps);
+    await backupMemos.putAll(memos);
+    await state.put('journal', {
+      'phase': 'applying',
+      'mapCount': maps.length,
+      'memoCount': memos.length,
+    });
+  }
+
+  Future<void> _finishHiveMutationJournal() async {
+    final state = await Hive.openBox<dynamic>(_restoreStateBoxName);
+    await state.delete('journal');
+    await (await Hive.openBox<MapInfo>(_restoreMapsBoxName)).clear();
+    await (await Hive.openBox<Memo>(_restoreMemosBoxName)).clear();
+  }
+
+  Future<void> _backfillHiveSyncMetadata() async {
+    final mapBox = _mapBox!;
+    for (final entry in mapBox.toMap().entries) {
+      final map = entry.value;
+      final localId = _intKey(entry.key) ?? map.id;
+      if (map.syncId == null || map.updatedAt == null || map.id != localId) {
+        await mapBox.put(
+          entry.key,
+          MapInfo(
+            id: localId,
+            title: map.title,
+            imagePath: map.imagePath,
+            syncId: map.syncId ?? _legacyMapSyncId(localId),
+            updatedAt:
+                map.updatedAt ??
+                DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+          ),
+        );
+      }
+    }
+
+    final memoBox = _memoBox!;
+    for (final entry in memoBox.toMap().entries) {
+      final memo = entry.value;
+      final localId = _intKey(entry.key) ?? memo.id;
+      if (memo.syncId == null || memo.updatedAt == null || memo.id != localId) {
+        memo.id = localId;
+        memo.syncId ??= _legacyMemoSyncId(memo.mapId, localId);
+        memo.updatedAt ??= DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+        await memoBox.put(entry.key, memo);
+      }
+    }
+  }
+
+  static int? _intKey(Object? key) {
+    if (key is int) return key;
+    return int.tryParse(key?.toString() ?? '');
+  }
+
+  static String _legacyMapSyncId(int? id) =>
+      id == null ? _uuid.v4() : 'legacy-map-$id';
+
+  static String _legacyMemoSyncId(int? mapId, int? id) =>
+      id == null ? _uuid.v4() : 'legacy-memo-${mapId ?? 'none'}-$id';
+
+  static Memo _withSyncMetadata(Memo memo, {bool touch = false}) {
+    memo.syncId ??= _legacyMemoSyncId(memo.mapId, memo.id);
+    memo.updatedAt ??= touch
+        ? DateTime.now().toUtc()
+        : DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+    return memo;
+  }
+
+  static MapInfo _mapWithSyncMetadata(
+    MapInfo map, {
+    int? id,
+    bool touch = false,
+  }) {
+    final localId = id ?? map.id;
+    return MapInfo(
+      id: localId,
+      title: map.title,
+      imagePath: map.imagePath,
+      syncId: map.syncId ?? _legacyMapSyncId(localId),
+      updatedAt:
+          map.updatedAt ??
+          (touch
+              ? DateTime.now().toUtc()
+              : DateTime.fromMillisecondsSinceEpoch(0, isUtc: true)),
+    );
   }
 
   Future<Database> get database async {
@@ -39,11 +171,16 @@ class DatabaseHelper {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
-    final db = await openDatabase(path,
-        version: 9, onCreate: _createDB, onUpgrade: _upgradeDB);
+    final db = await openDatabase(
+      path,
+      version: 9,
+      onCreate: _createDB,
+      onUpgrade: _upgradeDB,
+    );
 
     // レイヤー列が存在しない場合は追加
     await _ensureLayerColumn(db);
+    await _ensureSyncColumns(db);
 
     return db;
   }
@@ -54,6 +191,40 @@ class DatabaseHelper {
     if (!hasLayer) {
       await db.execute('ALTER TABLE memos ADD COLUMN layer INTEGER');
     }
+  }
+
+  Future<void> _ensureSyncColumns(Database db) async {
+    final memoColumns = await db.rawQuery('PRAGMA table_info(memos)');
+    final memoNames = memoColumns.map((row) => row['name']).toSet();
+    if (!memoNames.contains('syncId')) {
+      await db.execute('ALTER TABLE memos ADD COLUMN syncId TEXT');
+    }
+    if (!memoNames.contains('updatedAt')) {
+      await db.execute('ALTER TABLE memos ADD COLUMN updatedAt INTEGER');
+    }
+
+    final mapColumns = await db.rawQuery('PRAGMA table_info(maps)');
+    final mapNames = mapColumns.map((row) => row['name']).toSet();
+    if (!mapNames.contains('syncId')) {
+      await db.execute('ALTER TABLE maps ADD COLUMN syncId TEXT');
+    }
+    if (!mapNames.contains('updatedAt')) {
+      await db.execute('ALTER TABLE maps ADD COLUMN updatedAt INTEGER');
+    }
+
+    final epoch = DateTime.fromMillisecondsSinceEpoch(0).millisecondsSinceEpoch;
+    await db.execute(
+      "UPDATE maps SET syncId = 'legacy-map-' || id WHERE syncId IS NULL OR syncId = ''",
+    );
+    await db.execute(
+      "UPDATE memos SET syncId = 'legacy-memo-' || COALESCE(mapId, 'none') || '-' || id WHERE syncId IS NULL OR syncId = ''",
+    );
+    await db.execute('UPDATE maps SET updatedAt = ? WHERE updatedAt IS NULL', [
+      epoch,
+    ]);
+    await db.execute('UPDATE memos SET updatedAt = ? WHERE updatedAt IS NULL', [
+      epoch,
+    ]);
   }
 
   Future _createDB(Database db, int version) async {
@@ -93,7 +264,9 @@ CREATE TABLE memos (
   mushroomVolvaPresence $textNullType,
   mushroomHabitat $textNullType,
   mushroomGrowthPattern $textNullType,
-  layer $intType
+  layer $intType,
+  syncId $textNullType,
+  updatedAt $intType
 )
 ''');
 
@@ -101,7 +274,9 @@ CREATE TABLE memos (
 CREATE TABLE maps (
   id $idType,
   title $textType,
-  imagePath $textNullType
+  imagePath $textNullType,
+  syncId $textNullType,
+  updatedAt $intType
 )
 ''');
   }
@@ -142,62 +317,41 @@ CREATE TABLE maps (
       await db.execute('ALTER TABLE memos ADD COLUMN mushroomCapSurface TEXT');
       await db.execute('ALTER TABLE memos ADD COLUMN mushroomCapSize TEXT');
       await db.execute(
-          'ALTER TABLE memos ADD COLUMN mushroomCapUnderStructure TEXT');
+        'ALTER TABLE memos ADD COLUMN mushroomCapUnderStructure TEXT',
+      );
       await db.execute('ALTER TABLE memos ADD COLUMN mushroomGillFeature TEXT');
-      await db
-          .execute('ALTER TABLE memos ADD COLUMN mushroomStemPresence TEXT');
+      await db.execute(
+        'ALTER TABLE memos ADD COLUMN mushroomStemPresence TEXT',
+      );
       await db.execute('ALTER TABLE memos ADD COLUMN mushroomStemShape TEXT');
       await db.execute('ALTER TABLE memos ADD COLUMN mushroomStemColor TEXT');
       await db.execute('ALTER TABLE memos ADD COLUMN mushroomStemSurface TEXT');
-      await db
-          .execute('ALTER TABLE memos ADD COLUMN mushroomRingPresence TEXT');
-      await db
-          .execute('ALTER TABLE memos ADD COLUMN mushroomVolvaPresence TEXT');
+      await db.execute(
+        'ALTER TABLE memos ADD COLUMN mushroomRingPresence TEXT',
+      );
+      await db.execute(
+        'ALTER TABLE memos ADD COLUMN mushroomVolvaPresence TEXT',
+      );
       await db.execute('ALTER TABLE memos ADD COLUMN mushroomHabitat TEXT');
-      await db
-          .execute('ALTER TABLE memos ADD COLUMN mushroomGrowthPattern TEXT');
+      await db.execute(
+        'ALTER TABLE memos ADD COLUMN mushroomGrowthPattern TEXT',
+      );
     }
     if (oldVersion < 9) {
       await db.execute('ALTER TABLE memos ADD COLUMN layer INTEGER');
     }
   }
 
+  @override
   Future<Memo> create(Memo memo) async {
+    memo.syncId ??= _uuid.v4();
+    memo.updatedAt = DateTime.now().toUtc();
     if (kIsWeb) {
       await init();
       final key = await _memoBox!.add(memo);
-      return Memo(
-        id: key,
-        title: memo.title,
-        content: memo.content,
-        latitude: memo.latitude,
-        longitude: memo.longitude,
-        discoveryTime: memo.discoveryTime,
-        discoverer: memo.discoverer,
-        specimenNumber: memo.specimenNumber,
-        category: memo.category,
-        notes: memo.notes,
-        pinNumber: memo.pinNumber,
-        mapId: memo.mapId,
-        audioPath: memo.audioPath,
-        imagePaths: memo.imagePaths,
-        // キノコ詳細情報
-        mushroomCapShape: memo.mushroomCapShape,
-        mushroomCapColor: memo.mushroomCapColor,
-        mushroomCapSurface: memo.mushroomCapSurface,
-        mushroomCapSize: memo.mushroomCapSize,
-        mushroomCapUnderStructure: memo.mushroomCapUnderStructure,
-        mushroomGillFeature: memo.mushroomGillFeature,
-        mushroomStemPresence: memo.mushroomStemPresence,
-        mushroomStemShape: memo.mushroomStemShape,
-        mushroomStemColor: memo.mushroomStemColor,
-        mushroomStemSurface: memo.mushroomStemSurface,
-        mushroomRingPresence: memo.mushroomRingPresence,
-        mushroomVolvaPresence: memo.mushroomVolvaPresence,
-        mushroomHabitat: memo.mushroomHabitat,
-        mushroomGrowthPattern: memo.mushroomGrowthPattern,
-        layer: memo.layer,
-      );
+      memo.id = _intKey(key);
+      await _memoBox!.put(key, memo);
+      return memo;
     } else {
       final db = await instance.database;
       final id = await db.insert('memos', memo.toMap());
@@ -205,34 +359,40 @@ CREATE TABLE maps (
     }
   }
 
+  @override
   Future<MapInfo> createMap(MapInfo mapInfo) async {
+    final prepared = MapInfo(
+      title: mapInfo.title,
+      imagePath: mapInfo.imagePath,
+      syncId: mapInfo.syncId ?? _uuid.v4(),
+      updatedAt: mapInfo.updatedAt ?? DateTime.now().toUtc(),
+    );
     if (kIsWeb) {
       await init();
-      final key = await _mapBox!.add(mapInfo);
+      final key = await _mapBox!.add(prepared);
 
       // キーをintに変換（Hiveのキーはdynamicなのでintにキャスト）
       int? convertedId;
-      if (key is int) {
-        convertedId = key;
-      } else if (key != null) {
-        // 文字列や他の型の場合はint型に変換を試行
-        final keyString = key.toString();
-        convertedId = int.tryParse(keyString);
-      }
+      convertedId = key;
 
-      return MapInfo(
+      final stored = MapInfo(
         id: convertedId,
-        title: mapInfo.title,
-        imagePath: mapInfo.imagePath,
+        title: prepared.title,
+        imagePath: prepared.imagePath,
+        syncId: prepared.syncId,
+        updatedAt: prepared.updatedAt,
       );
+      await _mapBox!.put(key, stored);
+      return stored;
     } else {
       final db = await instance.database;
-      final id = await db.insert('maps', mapInfo.toMap());
-      return MapInfo(
-          id: id, title: mapInfo.title, imagePath: mapInfo.imagePath);
+      final data = Map<String, dynamic>.from(prepared.toMap())..remove('id');
+      final id = await db.insert('maps', data);
+      return prepared.copyWith(id: id);
     }
   }
 
+  @override
   Future<Memo> readMemo(int id) async {
     if (kIsWeb) {
       await init();
@@ -274,7 +434,10 @@ CREATE TABLE maps (
           'mushroomRingPresence',
           'mushroomVolvaPresence',
           'mushroomHabitat',
-          'mushroomGrowthPattern'
+          'mushroomGrowthPattern',
+          'layer',
+          'syncId',
+          'updatedAt',
         ],
         where: 'id = ?',
         whereArgs: [id],
@@ -288,6 +451,7 @@ CREATE TABLE maps (
     }
   }
 
+  @override
   Future<List<Memo>> readAllMemos() async {
     if (kIsWeb) {
       await init();
@@ -302,6 +466,7 @@ CREATE TABLE maps (
   }
 
   // 地図の名前を含むメモ一覧を取得
+  @override
   Future<List<Memo>> readAllMemosWithMapTitle() async {
     if (kIsWeb) {
       await init();
@@ -313,7 +478,7 @@ CREATE TABLE maps (
         if (memo.mapId != null) {
           final map = maps.firstWhere(
             (m) => m.id == memo.mapId,
-            orElse: () => MapInfo(title: '不明な地図'),
+            orElse: () => const MapInfo(title: '不明な地図'),
           );
           memo.mapTitle = map.title;
         }
@@ -341,8 +506,10 @@ CREATE TABLE maps (
       final maps = _mapBox!.values.toList();
 
       final filteredMemos = memos
-          .where((memo) =>
-              memo.title.toLowerCase().contains(searchQuery.toLowerCase()))
+          .where(
+            (memo) =>
+                memo.title.toLowerCase().contains(searchQuery.toLowerCase()),
+          )
           .toList();
 
       // 地図タイトルを設定
@@ -350,7 +517,7 @@ CREATE TABLE maps (
         if (memo.mapId != null) {
           final map = maps.firstWhere(
             (m) => m.id == memo.mapId,
-            orElse: () => MapInfo(title: '不明な地図'),
+            orElse: () => const MapInfo(title: '不明な地図'),
           );
           memo.mapTitle = map.title;
         }
@@ -359,13 +526,16 @@ CREATE TABLE maps (
       return filteredMemos;
     } else {
       final db = await instance.database;
-      final result = await db.rawQuery('''
+      final result = await db.rawQuery(
+        '''
         SELECT m.*, mp.title as mapTitle 
         FROM memos m 
         LEFT JOIN maps mp ON m.mapId = mp.id 
         WHERE m.title LIKE ? 
         ORDER BY m.id ASC
-      ''', ['%$searchQuery%']);
+      ''',
+        ['%$searchQuery%'],
+      );
 
       return result.map((json) => Memo.fromMap(json)).toList();
     }
@@ -380,15 +550,18 @@ CREATE TABLE maps (
 
       // 検索クエリに一致する地図IDを取得
       final matchingMaps = maps
-          .where((map) =>
-              map.title.toLowerCase().contains(searchQuery.toLowerCase()))
+          .where(
+            (map) =>
+                map.title.toLowerCase().contains(searchQuery.toLowerCase()),
+          )
           .toList();
 
       final matchingMapIds = matchingMaps.map((map) => map.id).toSet();
 
       final filteredMemos = memos
-          .where((memo) =>
-              memo.mapId != null && matchingMapIds.contains(memo.mapId))
+          .where(
+            (memo) => memo.mapId != null && matchingMapIds.contains(memo.mapId),
+          )
           .toList();
 
       // 地図タイトルを設定
@@ -396,7 +569,7 @@ CREATE TABLE maps (
         if (memo.mapId != null) {
           final map = maps.firstWhere(
             (m) => m.id == memo.mapId,
-            orElse: () => MapInfo(title: '不明な地図'),
+            orElse: () => const MapInfo(title: '不明な地図'),
           );
           memo.mapTitle = map.title;
         }
@@ -405,13 +578,16 @@ CREATE TABLE maps (
       return filteredMemos;
     } else {
       final db = await instance.database;
-      final result = await db.rawQuery('''
+      final result = await db.rawQuery(
+        '''
         SELECT m.*, mp.title as mapTitle 
         FROM memos m 
         LEFT JOIN maps mp ON m.mapId = mp.id 
         WHERE mp.title LIKE ? 
         ORDER BY m.id ASC
-      ''', ['%$searchQuery%']);
+      ''',
+        ['%$searchQuery%'],
+      );
 
       return result.map((json) => Memo.fromMap(json)).toList();
     }
@@ -426,16 +602,20 @@ CREATE TABLE maps (
 
       // 検索クエリに一致する地図IDを取得
       final matchingMaps = maps
-          .where((map) =>
-              map.title.toLowerCase().contains(searchQuery.toLowerCase()))
+          .where(
+            (map) =>
+                map.title.toLowerCase().contains(searchQuery.toLowerCase()),
+          )
           .toList();
 
       final matchingMapIds = matchingMaps.map((map) => map.id).toSet();
 
       final filteredMemos = memos
-          .where((memo) =>
-              memo.title.toLowerCase().contains(searchQuery.toLowerCase()) ||
-              (memo.mapId != null && matchingMapIds.contains(memo.mapId)))
+          .where(
+            (memo) =>
+                memo.title.toLowerCase().contains(searchQuery.toLowerCase()) ||
+                (memo.mapId != null && matchingMapIds.contains(memo.mapId)),
+          )
           .toList();
 
       // 地図タイトルを設定
@@ -443,7 +623,7 @@ CREATE TABLE maps (
         if (memo.mapId != null) {
           final map = maps.firstWhere(
             (m) => m.id == memo.mapId,
-            orElse: () => MapInfo(title: '不明な地図'),
+            orElse: () => const MapInfo(title: '不明な地図'),
           );
           memo.mapTitle = map.title;
         }
@@ -452,19 +632,23 @@ CREATE TABLE maps (
       return filteredMemos;
     } else {
       final db = await instance.database;
-      final result = await db.rawQuery('''
+      final result = await db.rawQuery(
+        '''
         SELECT m.*, mp.title as mapTitle 
         FROM memos m 
         LEFT JOIN maps mp ON m.mapId = mp.id 
         WHERE m.title LIKE ? OR mp.title LIKE ? 
         ORDER BY m.id ASC
-      ''', ['%$searchQuery%', '%$searchQuery%']);
+      ''',
+        ['%$searchQuery%', '%$searchQuery%'],
+      );
 
       return result.map((json) => Memo.fromMap(json)).toList();
     }
   }
 
   // 特定の地図IDのメモのみを取得
+  @override
   Future<List<Memo>> readMemosByMapId(int? mapId) async {
     if (kIsWeb) {
       await init();
@@ -505,7 +689,7 @@ CREATE TABLE maps (
       // 地図画像パスから地図IDを取得してメモを検索
       final matchingMap = maps.firstWhere(
         (map) => map.imagePath == mapImagePath,
-        orElse: () => MapInfo(title: ''),
+        orElse: () => const MapInfo(title: ''),
       );
 
       if (matchingMap.id != null) {
@@ -560,7 +744,7 @@ CREATE TABLE maps (
       // 既存の地図を検索
       final existing = maps.firstWhere(
         (map) => map.imagePath == mapImagePath,
-        orElse: () => MapInfo(title: ''),
+        orElse: () => const MapInfo(title: ''),
       );
 
       if (existing.id != null) {
@@ -598,6 +782,7 @@ CREATE TABLE maps (
     }
   }
 
+  @override
   Future<List<MapInfo>> readAllMaps() async {
     if (kIsWeb) {
       await init();
@@ -622,6 +807,10 @@ CREATE TABLE maps (
           id: convertedId,
           title: mapInfo.title,
           imagePath: mapInfo.imagePath,
+          syncId: mapInfo.syncId ?? _legacyMapSyncId(convertedId),
+          updatedAt:
+              mapInfo.updatedAt ??
+              DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
         );
 
         mapsList.add(mapWithId);
@@ -637,7 +826,9 @@ CREATE TABLE maps (
     }
   }
 
+  @override
   Future<int> update(Memo memo) async {
+    _withSyncMetadata(memo, touch: true);
     if (kIsWeb) {
       await init();
       if (memo.id != null) {
@@ -657,11 +848,13 @@ CREATE TABLE maps (
     }
   }
 
+  @override
   Future<int> updateMap(MapInfo mapInfo) async {
+    final prepared = _mapWithSyncMetadata(mapInfo, touch: true);
     if (kIsWeb) {
       await init();
-      if (mapInfo.id != null) {
-        await _mapBox!.put(mapInfo.id, mapInfo);
+      if (prepared.id != null) {
+        await _mapBox!.put(prepared.id, prepared);
         return 1; // 成功を示す
       }
       return 0; // 失敗を示す
@@ -670,13 +863,14 @@ CREATE TABLE maps (
 
       return db.update(
         'maps',
-        mapInfo.toMap(),
+        prepared.toMap(),
         where: 'id = ?',
-        whereArgs: [mapInfo.id],
+        whereArgs: [prepared.id],
       );
     }
   }
 
+  @override
   Future<int> delete(int id) async {
     if (kIsWeb) {
       await init();
@@ -685,20 +879,16 @@ CREATE TABLE maps (
     } else {
       final db = await instance.database;
 
-      return await db.delete(
-        'memos',
-        where: 'id = ?',
-        whereArgs: [id],
-      );
+      return await db.delete('memos', where: 'id = ?', whereArgs: [id]);
     }
   }
 
+  @override
   Future<int> deleteMap(int id) async {
     if (kIsWeb) {
       await init();
 
       // 関連するメモを削除
-      final memos = _memoBox!.values.toList();
       final relatedMemoKeys = <dynamic>[];
 
       for (var entry in _memoBox!.toMap().entries) {
@@ -717,20 +907,13 @@ CREATE TABLE maps (
     } else {
       final db = await instance.database;
 
-      await db.delete(
-        'memos',
-        where: 'mapId = ?',
-        whereArgs: [id],
-      );
+      await db.delete('memos', where: 'mapId = ?', whereArgs: [id]);
 
-      return await db.delete(
-        'maps',
-        where: 'id = ?',
-        whereArgs: [id],
-      );
+      return await db.delete('maps', where: 'id = ?', whereArgs: [id]);
     }
   }
 
+  @override
   Future<void> deleteAllMemos() async {
     if (kIsWeb) {
       await init();
@@ -741,6 +924,7 @@ CREATE TABLE maps (
     }
   }
 
+  @override
   Future<void> deleteAllMaps() async {
     if (kIsWeb) {
       await init();
@@ -751,25 +935,29 @@ CREATE TABLE maps (
     }
   }
 
+  @override
   Future<void> upsertMapInfo(MapInfo mapInfo) async {
+    final prepared = _mapWithSyncMetadata(mapInfo);
     if (kIsWeb) {
       await init();
-      if (mapInfo.id == null) {
-        final created = await createMap(mapInfo);
+      if (prepared.id == null) {
+        final created = await createMap(prepared);
         if (created.id != null) {
           await _mapBox!.put(created.id, created);
         }
       } else {
         final stored = MapInfo(
-          id: mapInfo.id,
-          title: mapInfo.title,
-          imagePath: mapInfo.imagePath,
+          id: prepared.id,
+          title: prepared.title,
+          imagePath: prepared.imagePath,
+          syncId: prepared.syncId,
+          updatedAt: prepared.updatedAt,
         );
-        await _mapBox!.put(mapInfo.id, stored);
+        await _mapBox!.put(prepared.id, stored);
       }
     } else {
       final db = await instance.database;
-      final data = Map<String, dynamic>.from(mapInfo.toMap());
+      final data = Map<String, dynamic>.from(prepared.toMap());
       await db.insert(
         'maps',
         data,
@@ -778,6 +966,7 @@ CREATE TABLE maps (
     }
   }
 
+  @override
   Future<void> replaceMemosForMap(int mapId, List<Memo> memos) async {
     if (kIsWeb) {
       await init();
@@ -791,18 +980,12 @@ CREATE TABLE maps (
 
       for (final memo in memos) {
         memo.mapId = mapId;
+        _withSyncMetadata(memo);
         if (memo.id != null) {
           await _memoBox!.put(memo.id, memo);
         } else {
           final key = await _memoBox!.add(memo);
-          if (key is int) {
-            memo.id = key;
-          } else {
-            final parsed = int.tryParse(key.toString());
-            if (parsed != null) {
-              memo.id = parsed;
-            }
-          }
+          memo.id = key;
         }
       }
     } else {
@@ -811,6 +994,7 @@ CREATE TABLE maps (
 
       for (final memo in memos) {
         memo.mapId = mapId;
+        _withSyncMetadata(memo);
         final data = Map<String, dynamic>.from(memo.toMap());
         if (memo.id == null) {
           data.remove('id');
@@ -825,6 +1009,196 @@ CREATE TABLE maps (
         }
       }
     }
+  }
+
+  @override
+  Future<void> upsertMemosForMap(int mapId, List<Memo> memos) async {
+    if (kIsWeb) {
+      await init();
+      for (final memo in memos) {
+        memo.mapId = mapId;
+        _withSyncMetadata(memo);
+        MapEntry<dynamic, Memo>? existingEntry;
+        for (final entry in _memoBox!.toMap().entries) {
+          if (entry.value.mapId == mapId && entry.value.syncId == memo.syncId) {
+            existingEntry = entry;
+            break;
+          }
+        }
+        if (existingEntry != null) {
+          final localUpdated =
+              existingEntry.value.updatedAt ??
+              DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+          final remoteUpdated =
+              memo.updatedAt ??
+              DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+          if (remoteUpdated.isBefore(localUpdated)) continue;
+          memo.id ??= _intKey(existingEntry.key);
+          await _memoBox!.put(existingEntry.key, memo);
+        } else if (memo.id != null &&
+            _memoBox!.get(memo.id)?.syncId == memo.syncId) {
+          await _memoBox!.put(memo.id, memo);
+        } else {
+          final key = await _memoBox!.add(memo);
+          memo.id = _intKey(key);
+          await _memoBox!.put(key, memo);
+        }
+      }
+      return;
+    }
+
+    final db = await instance.database;
+    await db.transaction((txn) async {
+      for (final memo in memos) {
+        memo.mapId = mapId;
+        _withSyncMetadata(memo);
+        final existing = await txn.query(
+          'memos',
+          columns: ['id', 'updatedAt'],
+          where: 'mapId = ? AND syncId = ?',
+          whereArgs: [mapId, memo.syncId],
+          limit: 1,
+        );
+        final data = Map<String, dynamic>.from(memo.toMap());
+        if (existing.isNotEmpty) {
+          final localUpdated = existing.first['updatedAt'] as int? ?? 0;
+          final remoteUpdated = memo.updatedAt?.millisecondsSinceEpoch ?? 0;
+          if (remoteUpdated >= localUpdated) {
+            final id = existing.first['id'] as int;
+            data['id'] = id;
+            memo.id = id;
+            await txn.update('memos', data, where: 'id = ?', whereArgs: [id]);
+          }
+        } else {
+          // A numeric id belongs to the source device. Always allocate a local
+          // id so an unrelated local record cannot be overwritten.
+          data.remove('id');
+          memo.id = await txn.insert(
+            'memos',
+            data,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+      }
+    });
+  }
+
+  @override
+  Future<void> deleteMemosBySyncIds(int mapId, Set<String> syncIds) async {
+    if (syncIds.isEmpty) return;
+    if (kIsWeb) {
+      await init();
+      final keys = <dynamic>[];
+      for (final entry in _memoBox!.toMap().entries) {
+        if (entry.value.mapId == mapId &&
+            syncIds.contains(entry.value.syncId)) {
+          keys.add(entry.key);
+        }
+      }
+      await _memoBox!.deleteAll(keys);
+      return;
+    }
+
+    final db = await instance.database;
+    final placeholders = List.filled(syncIds.length, '?').join(',');
+    await db.delete(
+      'memos',
+      where: 'mapId = ? AND syncId IN ($placeholders)',
+      whereArgs: [mapId, ...syncIds],
+    );
+  }
+
+  @override
+  Future<Map<int, int>> replaceAllDataAtomically(
+    List<MapInfo> maps,
+    List<Memo> memos,
+  ) async {
+    if (kIsWeb) {
+      await init();
+      final previousMaps = Map<dynamic, MapInfo>.from(_mapBox!.toMap());
+      final previousMemos = Map<dynamic, Memo>.from(_memoBox!.toMap());
+      final idMap = <int, int>{};
+      await _beginHiveMutationJournal(previousMaps, previousMemos);
+      try {
+        await _memoBox!.clear();
+        await _mapBox!.clear();
+        for (final map in maps) {
+          final stored = MapInfo(
+            title: map.title,
+            imagePath: map.imagePath,
+            syncId: map.syncId,
+            updatedAt: map.updatedAt,
+          );
+          final key = await _mapBox!.add(stored);
+          final newId = _intKey(key);
+          if (newId == null) throw StateError('Local map id was not allocated');
+          await _mapBox!.put(key, stored.copyWith(id: newId));
+          if (map.id != null) idMap[map.id!] = newId;
+        }
+        for (final memo in memos) {
+          final data = Map<String, dynamic>.from(memo.toMap())
+            ..remove('id')
+            ..['mapId'] = memo.mapId == null ? null : idMap[memo.mapId!];
+          final stored = Memo.fromMap(data);
+          final key = await _memoBox!.add(stored);
+          stored.id = _intKey(key);
+          await _memoBox!.put(key, stored);
+        }
+        await _finishHiveMutationJournal();
+        return idMap;
+      } catch (_) {
+        await _memoBox!.clear();
+        await _mapBox!.clear();
+        await _mapBox!.putAll(previousMaps);
+        await _memoBox!.putAll(previousMemos);
+        await _finishHiveMutationJournal();
+        rethrow;
+      }
+    }
+
+    final db = await instance.database;
+    return db.transaction((txn) async {
+      final idMap = <int, int>{};
+      await txn.delete('memos');
+      await txn.delete('maps');
+      for (final map in maps) {
+        final data = Map<String, dynamic>.from(map.toMap())..remove('id');
+        final newId = await txn.insert('maps', data);
+        if (map.id != null) idMap[map.id!] = newId;
+      }
+      for (final memo in memos) {
+        final data = Map<String, dynamic>.from(memo.toMap())..remove('id');
+        if (memo.mapId != null) data['mapId'] = idMap[memo.mapId!];
+        await txn.insert('memos', data);
+      }
+      return idMap;
+    });
+  }
+
+  @override
+  Future<void> clearAllDataAtomically() async {
+    if (kIsWeb) {
+      await init();
+      final previousMaps = Map<dynamic, MapInfo>.from(_mapBox!.toMap());
+      final previousMemos = Map<dynamic, Memo>.from(_memoBox!.toMap());
+      await _beginHiveMutationJournal(previousMaps, previousMemos);
+      try {
+        await _memoBox!.clear();
+        await _mapBox!.clear();
+        await _finishHiveMutationJournal();
+      } catch (_) {
+        await _mapBox!.putAll(previousMaps);
+        await _memoBox!.putAll(previousMemos);
+        await _finishHiveMutationJournal();
+        rethrow;
+      }
+      return;
+    }
+    final db = await instance.database;
+    await db.transaction((txn) async {
+      await txn.delete('memos');
+      await txn.delete('maps');
+    });
   }
 
   Future close() async {

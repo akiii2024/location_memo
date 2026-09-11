@@ -1,3 +1,4 @@
+import 'app_logger.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,20 +9,27 @@ import 'package:flutter/foundation.dart';
 
 import '../models/map_info.dart';
 import '../models/memo.dart';
+import 'collaboration_metadata_store.dart';
 import 'database_helper.dart';
+import 'sync_queue.dart';
 import '../utils/image_helper.dart';
 import 'package:path_provider/path_provider.dart';
 
 class FirebaseMapDownloadResult {
   final bool success;
   final String message;
+  final int? localMapId;
 
-  const FirebaseMapDownloadResult(
-      {required this.success, required this.message});
+  const FirebaseMapDownloadResult({
+    required this.success,
+    required this.message,
+    this.localMapId,
+  });
 }
 
 class FirebaseRemoteMapSummary {
   final int mapId;
+  final String remoteMapId;
   final String title;
   final DateTime? updatedAt;
   final int memoCount;
@@ -32,6 +40,7 @@ class FirebaseRemoteMapSummary {
 
   const FirebaseRemoteMapSummary({
     required this.mapId,
+    required this.remoteMapId,
     required this.title,
     this.updatedAt,
     required this.memoCount,
@@ -45,8 +54,23 @@ class FirebaseRemoteMapSummary {
 class FirebaseMapUploadResult {
   final bool success;
   final String message;
+  final String? remoteMapId;
 
-  const FirebaseMapUploadResult({required this.success, required this.message});
+  const FirebaseMapUploadResult({
+    required this.success,
+    required this.message,
+    this.remoteMapId,
+  });
+}
+
+class FirebaseMemoChangeSet {
+  const FirebaseMemoChangeSet({
+    this.upserts = const <Memo>[],
+    this.deletedSyncIds = const <String>{},
+  });
+
+  final List<Memo> upserts;
+  final Set<String> deletedSyncIds;
 }
 
 class FirebaseMapShareResult {
@@ -73,28 +97,52 @@ class FirebaseMapService {
 
   static final FirebaseMapService instance = FirebaseMapService._();
 
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseStorage _storage = FirebaseStorage.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  FirebaseFirestore get _firestore => FirebaseFirestore.instance;
+  FirebaseStorage get _storage => FirebaseStorage.instance;
+  FirebaseAuth get _auth => FirebaseAuth.instance;
 
   static int _memoIdFallbackCounter = 0;
 
+  @visibleForTesting
+  static MapInfo? resolveExistingLocalMap({
+    required Iterable<MapInfo> maps,
+    required String remoteSyncId,
+    required String remoteMapId,
+    int? associatedLocalMapId,
+  }) {
+    if (associatedLocalMapId != null) {
+      for (final map in maps) {
+        if (map.id == associatedLocalMapId) return map;
+      }
+    }
+    for (final map in maps) {
+      if (map.syncId == remoteSyncId || map.syncId == remoteMapId) return map;
+    }
+    return null;
+  }
+
   DocumentReference<Map<String, dynamic>> _mapDocument(
     String uid,
-    int mapId,
-  ) {
+    int mapId, {
+    String? remoteMapId,
+  }) {
     return _firestore
         .collection('users')
         .doc(uid)
         .collection('maps')
-        .doc(mapId.toString());
+        .doc(remoteMapId ?? mapId.toString());
   }
 
   CollectionReference<Map<String, dynamic>> _memoCollection(
     String uid,
-    int mapId,
-  ) {
-    return _mapDocument(uid, mapId).collection('memos');
+    int mapId, {
+    String? remoteMapId,
+  }) {
+    return _mapDocument(
+      uid,
+      mapId,
+      remoteMapId: remoteMapId,
+    ).collection('memos');
   }
 
   Future<List<FirebaseRemoteMapSummary>> fetchRemoteMaps() async {
@@ -121,7 +169,8 @@ class FirebaseMapService {
       summaries.add(
         FirebaseRemoteMapSummary(
           mapId: mapId,
-          title: data['title']?.toString() ?? 'Untitled map',
+          remoteMapId: doc.id,
+          title: data['title']?.toString() ?? '名称未設定の地図',
           updatedAt: updatedAt,
           memoCount: (data['memoCount'] as num?)?.toInt() ?? 0,
           imageUrl: data['imageUrl']?.toString(),
@@ -159,7 +208,8 @@ class FirebaseMapService {
       summaries.add(
         FirebaseRemoteMapSummary(
           mapId: mapId,
-          title: data['title']?.toString() ?? 'Untitled map',
+          remoteMapId: doc.id,
+          title: data['title']?.toString() ?? '名称未設定の地図',
           updatedAt: updatedAt,
           memoCount: (data['memoCount'] as num?)?.toInt() ?? 0,
           imageUrl: data['imageUrl']?.toString(),
@@ -182,8 +232,11 @@ class FirebaseMapService {
   Future<FirebaseMapDownloadResult> downloadMap(
     int mapId, {
     String? ownerUid,
+    String? remoteMapId,
     bool importAsCopy = false,
   }) async {
+    int? createdLocalMapId;
+    final downloadedLocalFiles = <String>[];
     try {
       final user = _requireUser();
       final targetOwnerId = ownerUid ?? user.uid;
@@ -192,13 +245,13 @@ class FirebaseMapService {
           .collection('users')
           .doc(targetOwnerId)
           .collection('maps')
-          .doc(mapId.toString());
+          .doc(remoteMapId ?? mapId.toString());
       final doc = await docRef.get();
 
       if (!doc.exists) {
         return const FirebaseMapDownloadResult(
           success: false,
-          message: 'Map not found on Firebase.',
+          message: 'クラウド上に地図が見つかりませんでした。',
         );
       }
 
@@ -208,35 +261,67 @@ class FirebaseMapService {
         if (!sharedWith.contains(user.uid)) {
           return const FirebaseMapDownloadResult(
             success: false,
-            message: 'You do not have permission to download this map.',
+            message: 'この地図を取得する権限がありません。',
           );
         }
       }
 
+      final resolvedRemoteMapId = doc.id;
+      final remoteSyncId = switch (data['syncId']?.toString().trim()) {
+        final value? when value.isNotEmpty => value,
+        _ => resolvedRemoteMapId,
+      };
+      final remoteUpdatedAt = _parseTimestamp(data['updatedAt']);
+      final remoteTitle = data['title']?.toString() ?? '名称未設定の地図';
+      final existingMaps = await DatabaseHelper.instance.readAllMaps();
       MapInfo? existingMap;
       if (!importAsCopy) {
-        final existingMaps = await DatabaseHelper.instance.readAllMaps();
-        for (final map in existingMaps) {
-          if (map.id == mapId) {
-            existingMap = map;
-            break;
-          }
-        }
+        final associatedLocalId = await CollaborationMetadataStore.instance
+            .findLocalMapId(
+              ownerUid: targetOwnerId,
+              remoteMapId: resolvedRemoteMapId,
+            );
+        existingMap = resolveExistingLocalMap(
+          maps: existingMaps,
+          remoteSyncId: remoteSyncId,
+          remoteMapId: resolvedRemoteMapId,
+          associatedLocalMapId: associatedLocalId,
+        );
       }
 
-      String? imagePath = existingMap?.imagePath;
+      // Fetch all remote records before changing local state. The local id is
+      // allocated by this device and is never copied from another device.
+      final memosSnapshot = await docRef.collection('memos').get();
+      if (existingMap == null) {
+        final created = await DatabaseHelper.instance.createMap(
+          MapInfo(
+            title: remoteTitle,
+            syncId: importAsCopy ? null : remoteSyncId,
+            updatedAt: remoteUpdatedAt,
+          ),
+        );
+        createdLocalMapId = created.id;
+        existingMap = created;
+      }
+      final localMapId = existingMap.id;
+      if (localMapId == null) {
+        throw StateError('Local map id was not allocated.');
+      }
+
+      String? imagePath = existingMap.imagePath;
       final imageUrl = data['imageUrl']?.toString();
       if (imageUrl != null && imageUrl.isNotEmpty) {
         final resolved = await _downloadBinaryFromUrl(
           imageUrl,
           defaultContentType: 'image/png',
         );
-        if (resolved != null) {
-          imagePath = await _saveMapImage(mapId, resolved);
+        if (resolved == null) throw StateError('Map image download failed.');
+        imagePath = await _saveMapImage(localMapId, resolved);
+        if (imagePath != null && !imagePath.startsWith('data:')) {
+          downloadedLocalFiles.add(imagePath);
         }
       }
 
-      final memosSnapshot = await docRef.collection('memos').get();
       final memos = <Memo>[];
       for (final memoDoc in memosSnapshot.docs) {
         final memoData = memoDoc.data();
@@ -256,11 +341,13 @@ class FirebaseMapService {
         } else if (discoveryRaw is int) {
           discoveryTime = DateTime.fromMillisecondsSinceEpoch(discoveryRaw);
         } else if (discoveryRaw is num) {
-          discoveryTime =
-              DateTime.fromMillisecondsSinceEpoch(discoveryRaw.toInt());
+          discoveryTime = DateTime.fromMillisecondsSinceEpoch(
+            discoveryRaw.toInt(),
+          );
         }
 
-        final imageUrls = (memoData['imageUrls'] as List?)?.cast<String>() ??
+        final imageUrls =
+            (memoData['imageUrls'] as List?)?.cast<String>() ??
             const <String>[];
         final localImagePaths = <String>[];
         for (var i = 0; i < imageUrls.length; i++) {
@@ -268,11 +355,19 @@ class FirebaseMapService {
             imageUrls[i],
             defaultContentType: 'image/png',
           );
-          if (resolved != null) {
-            final saved = await _saveMemoImage(mapId, memoDoc.id, i, resolved);
-            if (saved != null) {
-              localImagePaths.add(saved);
-            }
+          if (resolved == null) {
+            throw StateError('Memo image download failed.');
+          }
+          final saved = await _saveMemoImage(
+            localMapId,
+            memoDoc.id,
+            i,
+            resolved,
+          );
+          if (saved == null) throw StateError('Memo image save failed.');
+          localImagePaths.add(saved);
+          if (!saved.startsWith('data:')) {
+            downloadedLocalFiles.add(saved);
           }
         }
 
@@ -283,8 +378,11 @@ class FirebaseMapService {
             audioUrl,
             defaultContentType: 'audio/aac',
           );
-          if (resolved != null) {
-            audioPath = await _saveMemoAudio(mapId, memoDoc.id, resolved);
+          if (resolved == null) throw StateError('Memo audio download failed.');
+          audioPath = await _saveMemoAudio(localMapId, memoDoc.id, resolved);
+          if (audioPath == null) throw StateError('Memo audio save failed.');
+          if (!audioPath.startsWith('data:')) {
+            downloadedLocalFiles.add(audioPath);
           }
         }
 
@@ -300,15 +398,15 @@ class FirebaseMapService {
           category: memoData['category']?.toString(),
           notes: memoData['notes']?.toString(),
           pinNumber: (memoData['pinNumber'] as num?)?.toInt(),
-          mapId: mapId,
+          mapId: localMapId,
           audioPath: audioPath,
           imagePaths: localImagePaths.isEmpty ? null : localImagePaths,
           mushroomCapShape: memoData['mushroomCapShape']?.toString(),
           mushroomCapColor: memoData['mushroomCapColor']?.toString(),
           mushroomCapSurface: memoData['mushroomCapSurface']?.toString(),
           mushroomCapSize: memoData['mushroomCapSize']?.toString(),
-          mushroomCapUnderStructure:
-              memoData['mushroomCapUnderStructure']?.toString(),
+          mushroomCapUnderStructure: memoData['mushroomCapUnderStructure']
+              ?.toString(),
           mushroomGillFeature: memoData['mushroomGillFeature']?.toString(),
           mushroomStemPresence: memoData['mushroomStemPresence']?.toString(),
           mushroomStemShape: memoData['mushroomStemShape']?.toString(),
@@ -319,51 +417,84 @@ class FirebaseMapService {
           mushroomHabitat: memoData['mushroomHabitat']?.toString(),
           mushroomGrowthPattern: memoData['mushroomGrowthPattern']?.toString(),
           layer: (memoData['layer'] as num?)?.toInt(),
+          syncId: memoData['syncId']?.toString() ?? memoDoc.id,
+          updatedAt: _parseTimestamp(memoData['updatedAt']),
         );
         memos.add(memo);
       }
 
       final mapInfo = MapInfo(
-        id: mapId,
-        title: data['title']?.toString() ?? 'Untitled map',
+        id: localMapId,
+        title: remoteTitle,
         imagePath: imagePath,
+        syncId: importAsCopy ? existingMap.syncId : remoteSyncId,
+        updatedAt: remoteUpdatedAt,
       );
 
       if (importAsCopy) {
-        final createdMap = await DatabaseHelper.instance.createMap(
-          MapInfo(title: mapInfo.title, imagePath: mapInfo.imagePath),
-        );
-        final newMapId = createdMap.id;
-        if (newMapId == null) {
-          return const FirebaseMapDownloadResult(
-            success: false,
-            message: 'インポートに失敗しました: map id が生成されませんでした。',
-          );
-        }
+        await DatabaseHelper.instance.upsertMapInfo(mapInfo);
         for (final memo in memos) {
           memo.id = null;
-          memo.mapId = newMapId;
+          memo.mapId = localMapId;
         }
-        await DatabaseHelper.instance.replaceMemosForMap(newMapId, memos);
-        return const FirebaseMapDownloadResult(
+        await DatabaseHelper.instance.replaceMemosForMap(localMapId, memos);
+        return FirebaseMapDownloadResult(
           success: true,
           message: '共有地図をインポートしました。',
+          localMapId: localMapId,
         );
       }
 
       await DatabaseHelper.instance.upsertMapInfo(mapInfo);
-      await DatabaseHelper.instance.replaceMemosForMap(mapId, memos);
+      final pending = await SyncQueueStore.instance.pendingSyncIdsForMap(
+        localMapId,
+      );
+      final safeMemos = memos
+          .where(
+            (memo) => memo.syncId == null || !pending.contains(memo.syncId),
+          )
+          .toList();
+      final remoteSyncIds = memos
+          .map((memo) => memo.syncId)
+          .whereType<String>()
+          .toSet();
+      final localMemos = await DatabaseHelper.instance.readMemosByMapId(
+        localMapId,
+      );
+      final safeDeletes = localMemos
+          .map((memo) => memo.syncId)
+          .whereType<String>()
+          .where(
+            (syncId) =>
+                !pending.contains(syncId) && !remoteSyncIds.contains(syncId),
+          )
+          .toSet();
+      await DatabaseHelper.instance.upsertMemosForMap(localMapId, safeMemos);
+      await DatabaseHelper.instance.deleteMemosBySyncIds(
+        localMapId,
+        safeDeletes,
+      );
 
-      return const FirebaseMapDownloadResult(
+      return FirebaseMapDownloadResult(
         success: true,
-        message: 'Map downloaded from Firebase.',
+        message: 'クラウドから地図を取得しました。',
+        localMapId: localMapId,
       );
     } catch (error, stackTrace) {
-      debugPrint('Firebase download failed: $error');
-      debugPrintStack(stackTrace: stackTrace);
-      return FirebaseMapDownloadResult(
+      if (createdLocalMapId != null) {
+        try {
+          await DatabaseHelper.instance.deleteMap(createdLocalMapId);
+        } catch (_) {
+          // Preserve the original failure; incomplete local maps are retried on
+          // the next download and are never associated with collaboration.
+        }
+        await _deleteLocalFilesBestEffort(downloadedLocalFiles);
+      }
+      appLog('Firebase download failed: $error');
+      appLog('Stack trace', stackTrace);
+      return const FirebaseMapDownloadResult(
         success: false,
-        message: 'Download failed: $error',
+        message: 'ダウンロードに失敗しました。通信状況とアクセス権を確認してください。',
       );
     }
   }
@@ -372,23 +503,30 @@ class FirebaseMapService {
     if (mapInfo.id == null) {
       return const FirebaseMapUploadResult(
         success: false,
-        message: 'Map id is missing.',
+        message: '先に地図を端末へ保存してください。',
       );
     }
 
     try {
       final user = _requireUser();
       final memos = await DatabaseHelper.instance.readMemosByMapId(mapInfo.id!);
-
-      final docRef = _firestore
-          .collection('users')
-          .doc(user.uid)
-          .collection('maps')
-          .doc(mapInfo.id.toString());
-
-      final mapStorageRoot =
-          _storage.ref().child('users/${user.uid}/maps/${mapInfo.id}');
-      await _clearStorageFolder(mapStorageRoot);
+      final remoteMapId = _remoteMapIdFor(mapInfo);
+      final docRef = _mapDocument(
+        user.uid,
+        mapInfo.id!,
+        remoteMapId: remoteMapId,
+      );
+      final previous = await docRef.get();
+      final previousBaseGeneration = previous
+          .data()?['baseAssetGeneration']
+          ?.toString();
+      final generation = DateTime.now()
+          .toUtc()
+          .microsecondsSinceEpoch
+          .toString();
+      final mapStorageRoot = _storage.ref().child(
+        'users/${user.uid}/maps/$remoteMapId/base_generations/$generation',
+      );
 
       String? imageUrl;
       final resolvedMapImage = await _resolveBinary(mapInfo.imagePath);
@@ -400,68 +538,144 @@ class FirebaseMapService {
           resolvedMapImage.bytes,
           SettableMetadata(contentType: resolvedMapImage.contentType),
         );
-        imageUrl = await mapImageRef.getDownloadURL();
+        imageUrl = _storageUri(mapImageRef);
+      }
+
+      final uploadedMemoIds = <String>{};
+      for (final memo in memos) {
+        uploadedMemoIds.add(_memoDocumentId(memo));
+        await _upsertMemoDocument(
+          mapId: mapInfo.id!,
+          remoteMapId: remoteMapId,
+          ownerUid: user.uid,
+          memo: memo,
+          generation: generation,
+        );
       }
 
       await docRef.set({
+        'id': mapInfo.id,
+        'syncId': mapInfo.syncId ?? remoteMapId,
         'title': mapInfo.title,
         'imageUrl': imageUrl,
-        'updatedAt': FieldValue.serverTimestamp(),
+        'baseAssetGeneration': generation,
+        'updatedAt': Timestamp.fromDate(
+          mapInfo.updatedAt ?? DateTime.now().toUtc(),
+        ),
+        'syncedAt': FieldValue.serverTimestamp(),
         'memoCount': memos.length,
         'ownerId': user.uid,
         'ownerEmail': user.email,
       }, SetOptions(merge: true));
 
-      await _replaceMemoDocuments(docRef, mapInfo, memos, user.uid);
+      // Remove stale documents only after the new generation and references
+      // have been committed successfully.
+      final remoteMemos = await docRef.collection('memos').get();
+      for (final remoteMemo in remoteMemos.docs) {
+        if (!uploadedMemoIds.contains(remoteMemo.id)) {
+          await remoteMemo.reference.delete();
+        }
+      }
+      if (previousBaseGeneration != null &&
+          previousBaseGeneration != generation) {
+        await _clearStorageFolder(
+          _storage.ref().child(
+            'users/${user.uid}/maps/$remoteMapId/base_generations/$previousBaseGeneration',
+          ),
+        );
+      }
 
-      return const FirebaseMapUploadResult(
+      return FirebaseMapUploadResult(
         success: true,
-        message: 'Map was uploaded to Firebase.',
+        message: 'クラウドへ地図を保存しました。',
+        remoteMapId: remoteMapId,
       );
     } catch (error, stackTrace) {
-      debugPrint('Firebase upload failed: $error');
-      debugPrintStack(stackTrace: stackTrace);
-      return FirebaseMapUploadResult(
+      appLog('Firebase upload failed: $error');
+      appLog('Stack trace', stackTrace);
+      return const FirebaseMapUploadResult(
         success: false,
-        message: 'Upload failed: $error',
+        message: 'アップロードに失敗しました。通信状況とアクセス権を確認してください。',
       );
     }
   }
 
-  Stream<List<Memo>> subscribeToMapMemos({
+  Stream<FirebaseMemoChangeSet> subscribeToMapMemos({
     required int mapId,
     required String ownerUid,
+    String? remoteMapId,
   }) {
-    final collection = _memoCollection(ownerUid, mapId);
+    final collection = _memoCollection(
+      ownerUid,
+      mapId,
+      remoteMapId: remoteMapId,
+    );
     return collection.snapshots().asyncMap((snapshot) async {
-      final memos = <Memo>[];
-      for (final doc in snapshot.docs) {
+      final upserts = <Memo>[];
+      final deletedSyncIds = <String>{};
+      for (final change in snapshot.docChanges) {
+        if (change.type == DocumentChangeType.removed) {
+          deletedSyncIds.add(
+            change.doc.data()?['syncId']?.toString() ?? change.doc.id,
+          );
+          continue;
+        }
         try {
-          final memo = await _memoFromSnapshot(mapId, doc);
-          memos.add(memo);
+          upserts.add(await _memoFromSnapshot(mapId, change.doc));
         } catch (error, stackTrace) {
-          debugPrint('Failed to parse memo snapshot: $error');
-          debugPrintStack(stackTrace: stackTrace);
+          appLog(
+            'Failed to parse memo snapshot: ${error.runtimeType}',
+            stackTrace,
+          );
         }
       }
-      memos.sort((a, b) => (a.pinNumber ?? 0).compareTo(b.pinNumber ?? 0));
-      return memos;
+      return FirebaseMemoChangeSet(
+        upserts: upserts,
+        deletedSyncIds: deletedSyncIds,
+      );
     });
   }
 
   Future<void> upsertMemo({
     required int mapId,
+    required String remoteMapId,
     required String ownerUid,
     required Memo memo,
   }) async {
-    if (memo.id == null) {
-      throw ArgumentError('memo.id is required to sync with Firebase');
-    }
-    final docRef = _memoCollection(ownerUid, mapId).doc(memo.id.toString());
-    final assets = await _uploadMemoAssets(ownerUid, mapId, memo.id, memo);
+    await _upsertMemoDocument(
+      mapId: mapId,
+      remoteMapId: remoteMapId,
+      ownerUid: ownerUid,
+      memo: memo,
+      generation: DateTime.now().toUtc().microsecondsSinceEpoch.toString(),
+    );
+  }
+
+  Future<void> _upsertMemoDocument({
+    required int mapId,
+    required String remoteMapId,
+    required String ownerUid,
+    required Memo memo,
+    required String generation,
+  }) async {
+    final memoDocumentId = _memoDocumentId(memo);
+    final docRef = _memoCollection(
+      ownerUid,
+      mapId,
+      remoteMapId: remoteMapId,
+    ).doc(memoDocumentId);
+    final previous = await docRef.get();
+    final previousGeneration = previous.data()?['assetGeneration']?.toString();
+    final assets = await _uploadMemoAssets(
+      ownerUid,
+      remoteMapId,
+      memo,
+      generation,
+    );
 
     final data = <String, dynamic>{
       'id': memo.id,
+      'syncId': memo.syncId ?? memoDocumentId,
       'title': memo.title,
       'content': memo.content,
       'latitude': memo.latitude,
@@ -490,23 +704,41 @@ class FirebaseMapService {
       'mushroomHabitat': memo.mushroomHabitat,
       'mushroomGrowthPattern': memo.mushroomGrowthPattern,
       'layer': memo.layer,
-      'updatedAt': FieldValue.serverTimestamp(),
+      'assetGeneration': generation,
+      'updatedAt': Timestamp.fromDate(memo.updatedAt ?? DateTime.now().toUtc()),
+      'syncedAt': FieldValue.serverTimestamp(),
     };
 
     await docRef.set(data, SetOptions(merge: true));
+    if (previousGeneration != null && previousGeneration != generation) {
+      await _clearStorageFolder(
+        _storage.ref().child(
+          'users/$ownerUid/maps/$remoteMapId/memos/$memoDocumentId/generations/$previousGeneration',
+        ),
+      );
+    }
   }
 
   Future<void> deleteMemo({
     required int mapId,
+    required String remoteMapId,
     required String ownerUid,
-    required int memoId,
+    required String memoSyncId,
+    int? legacyMemoId,
   }) async {
-    final docRef = _memoCollection(ownerUid, mapId).doc(memoId.toString());
-    await docRef.delete();
+    final collection = _memoCollection(
+      ownerUid,
+      mapId,
+      remoteMapId: remoteMapId,
+    );
+    await collection.doc(memoSyncId).delete();
+    if (legacyMemoId != null && legacyMemoId.toString() != memoSyncId) {
+      await collection.doc(legacyMemoId.toString()).delete();
+    }
     try {
-      final folderRef = _storage
-          .ref()
-          .child('users/$ownerUid/maps/$mapId/memos/${memoId.toString()}');
+      final folderRef = _storage.ref().child(
+        'users/$ownerUid/maps/$remoteMapId/memos/$memoSyncId',
+      );
       await _clearStorageFolder(folderRef);
     } on FirebaseException catch (error) {
       if (error.code != 'object-not-found') {
@@ -531,7 +763,7 @@ class FirebaseMapService {
       final user = _requireUser();
       final profile = await _findUserProfileByEmail(normalizedEmail);
       if (profile == null) {
-        return FirebaseMapShareResult(
+        return const FirebaseMapShareResult(
           success: false,
           message: '指定されたメールアドレスのユーザーが見つかりません。',
         );
@@ -543,11 +775,7 @@ class FirebaseMapService {
         );
       }
 
-      final docRef = _firestore
-          .collection('users')
-          .doc(user.uid)
-          .collection('maps')
-          .doc(mapId.toString());
+      final docRef = await _mapDocumentForLocalId(user.uid, mapId);
       final doc = await docRef.get();
       if (!doc.exists) {
         return const FirebaseMapShareResult(
@@ -566,11 +794,11 @@ class FirebaseMapService {
         message: '${profile.email} と共有しました。',
       );
     } catch (error, stackTrace) {
-      debugPrint('Firebase share failed: $error');
-      debugPrintStack(stackTrace: stackTrace);
-      return FirebaseMapShareResult(
+      appLog('Firebase share failed: $error');
+      appLog('Stack trace', stackTrace);
+      return const FirebaseMapShareResult(
         success: false,
-        message: '共有に失敗しました: $error',
+        message: '共有に失敗しました。入力内容と通信状況を確認してください。',
       );
     }
   }
@@ -588,11 +816,7 @@ class FirebaseMapService {
 
     try {
       final user = _requireUser();
-      final docRef = _firestore
-          .collection('users')
-          .doc(user.uid)
-          .collection('maps')
-          .doc(mapId.toString());
+      final docRef = await _mapDocumentForLocalId(user.uid, mapId);
       final doc = await docRef.get();
       if (!doc.exists) {
         return const FirebaseMapShareResult(
@@ -611,11 +835,11 @@ class FirebaseMapService {
         message: '共有設定を更新しました。',
       );
     } catch (error, stackTrace) {
-      debugPrint('Firebase revoke share failed: $error');
-      debugPrintStack(stackTrace: stackTrace);
-      return FirebaseMapShareResult(
+      appLog('Firebase revoke share failed: $error');
+      appLog('Stack trace', stackTrace);
+      return const FirebaseMapShareResult(
         success: false,
-        message: '共有の解除に失敗しました: $error',
+        message: '共有の解除に失敗しました。時間をおいて再試行してください。',
       );
     }
   }
@@ -623,11 +847,7 @@ class FirebaseMapService {
   Future<List<FirebaseSharedUser>> fetchSharedUsers(int mapId) async {
     try {
       final user = _requireUser();
-      final docRef = _firestore
-          .collection('users')
-          .doc(user.uid)
-          .collection('maps')
-          .doc(mapId.toString());
+      final docRef = await _mapDocumentForLocalId(user.uid, mapId);
       final doc = await docRef.get();
       if (!doc.exists) {
         return const <FirebaseSharedUser>[];
@@ -649,8 +869,8 @@ class FirebaseMapService {
       profiles.sort((a, b) => a.email.compareTo(b.email));
       return profiles;
     } catch (error, stackTrace) {
-      debugPrint('Firebase fetch shared users failed: $error');
-      debugPrintStack(stackTrace: stackTrace);
+      appLog('Firebase fetch shared users failed: $error');
+      appLog('Stack trace', stackTrace);
       return const <FirebaseSharedUser>[];
     }
   }
@@ -661,31 +881,70 @@ class FirebaseMapService {
       return null;
     }
 
-    QuerySnapshot<Map<String, dynamic>> snapshot = await _firestore
-        .collection('userProfiles')
-        .where('emailLower', isEqualTo: normalized)
-        .limit(1)
+    final doc = await _firestore
+        .collection('shareDirectory')
+        .doc(normalized)
         .get();
-
-    if (snapshot.docs.isEmpty) {
-      snapshot = await _firestore
-          .collection('userProfiles')
-          .where('email', isEqualTo: email)
-          .limit(1)
-          .get();
-    }
-
-    if (snapshot.docs.isEmpty) {
+    final data = doc.data();
+    final uid = data?['uid']?.toString();
+    if (!doc.exists || data == null || uid == null || uid.isEmpty) {
       return null;
     }
 
-    final doc = snapshot.docs.first;
-    final data = doc.data();
     return FirebaseSharedUser(
-      uid: doc.id,
-      email: data['email']?.toString() ?? normalized,
+      uid: uid,
+      email: normalized,
       displayName: data['displayName']?.toString(),
     );
+  }
+
+  /// ログイン中ユーザーが所有するクラウドデータを削除する。
+  ///
+  /// Firebase Auth自体の削除は、呼び出し側で再認証後に行う。
+  Future<void> deleteCurrentUserCloudData() async {
+    final user = _requireUser();
+    final maps = await _firestore
+        .collection('users')
+        .doc(user.uid)
+        .collection('maps')
+        .get();
+
+    for (final map in maps.docs) {
+      await _deleteCollectionInBatches(map.reference.collection('memos'));
+      await map.reference.delete();
+    }
+
+    await _clearStorageFolder(_storage.ref().child('users/${user.uid}'));
+    await _clearStorageFolder(_storage.ref().child('userProfiles/${user.uid}'));
+
+    await _firestore.collection('userProfiles').doc(user.uid).delete();
+
+    final email = user.email?.trim().toLowerCase();
+    if (email != null && email.isNotEmpty) {
+      await _firestore.collection('shareDirectory').doc(email).delete();
+    }
+  }
+
+  Future<void> _deleteCollectionInBatches(
+    CollectionReference<Map<String, dynamic>> collection,
+  ) async {
+    const batchSize = 400;
+    while (true) {
+      final snapshot = await collection.limit(batchSize).get();
+      if (snapshot.docs.isEmpty) {
+        return;
+      }
+
+      final batch = _firestore.batch();
+      for (final doc in snapshot.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+
+      if (snapshot.docs.length < batchSize) {
+        return;
+      }
+    }
   }
 
   Future<FirebaseSharedUser?> _fetchUserProfile(String uid) async {
@@ -704,7 +963,7 @@ class FirebaseMapService {
         displayName: data['displayName']?.toString(),
       );
     } catch (error) {
-      debugPrint('Firebase fetch user profile failed: $error');
+      appLog('Firebase fetch user profile failed: $error');
       return null;
     }
   }
@@ -718,16 +977,16 @@ class FirebaseMapService {
 
   DateTime? _parseTimestamp(dynamic value) {
     if (value is Timestamp) {
-      return value.toDate();
+      return value.toDate().toUtc();
     }
     if (value is DateTime) {
-      return value;
+      return value.toUtc();
     }
     if (value is int) {
-      return DateTime.fromMillisecondsSinceEpoch(value);
+      return DateTime.fromMillisecondsSinceEpoch(value, isUtc: true);
     }
     if (value is num) {
-      return DateTime.fromMillisecondsSinceEpoch(value.toInt());
+      return DateTime.fromMillisecondsSinceEpoch(value.toInt(), isUtc: true);
     }
     return null;
   }
@@ -740,56 +999,37 @@ class FirebaseMapService {
     return current;
   }
 
-  Future<void> _replaceMemoDocuments(
-    DocumentReference<Map<String, dynamic>> mapDoc,
-    MapInfo mapInfo,
-    List<Memo> memos,
-    String uid,
-  ) async {
-    final memosCollection = mapDoc.collection('memos');
-    final existing = await memosCollection.get();
-    for (final doc in existing.docs) {
-      await doc.reference.delete();
+  String _remoteMapIdFor(MapInfo mapInfo) {
+    final syncId = mapInfo.syncId;
+    if (syncId != null &&
+        syncId.isNotEmpty &&
+        !syncId.startsWith('legacy-map-')) {
+      return syncId;
     }
+    return mapInfo.id.toString();
+  }
 
-    for (final memo in memos) {
-      final memoId = memo.id?.toString() ?? _temporaryMemoId();
-      final memoDoc = memosCollection.doc(memoId);
-      final uploadedAssets =
-          await _uploadMemoAssets(uid, mapInfo.id!, memo.id, memo);
-      await memoDoc.set({
-        'id': memo.id,
-        'title': memo.title,
-        'content': memo.content,
-        'latitude': memo.latitude,
-        'longitude': memo.longitude,
-        'discoveryTime': memo.discoveryTime?.millisecondsSinceEpoch,
-        'discoverer': memo.discoverer,
-        'specimenNumber': memo.specimenNumber,
-        'category': memo.category,
-        'notes': memo.notes,
-        'pinNumber': memo.pinNumber,
-        'mapId': memo.mapId,
-        'audioUrl': uploadedAssets.audioUrl,
-        'imageUrls': uploadedAssets.imageUrls,
-        'mushroomCapShape': memo.mushroomCapShape,
-        'mushroomCapColor': memo.mushroomCapColor,
-        'mushroomCapSurface': memo.mushroomCapSurface,
-        'mushroomCapSize': memo.mushroomCapSize,
-        'mushroomCapUnderStructure': memo.mushroomCapUnderStructure,
-        'mushroomGillFeature': memo.mushroomGillFeature,
-        'mushroomStemPresence': memo.mushroomStemPresence,
-        'mushroomStemShape': memo.mushroomStemShape,
-        'mushroomStemColor': memo.mushroomStemColor,
-        'mushroomStemSurface': memo.mushroomStemSurface,
-        'mushroomRingPresence': memo.mushroomRingPresence,
-        'mushroomVolvaPresence': memo.mushroomVolvaPresence,
-        'mushroomHabitat': memo.mushroomHabitat,
-        'mushroomGrowthPattern': memo.mushroomGrowthPattern,
-        'layer': memo.layer,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+  Future<DocumentReference<Map<String, dynamic>>> _mapDocumentForLocalId(
+    String uid,
+    int mapId,
+  ) async {
+    final maps = await DatabaseHelper.instance.readAllMaps();
+    for (final map in maps) {
+      if (map.id == mapId) {
+        return _mapDocument(uid, mapId, remoteMapId: _remoteMapIdFor(map));
+      }
     }
+    return _mapDocument(uid, mapId);
+  }
+
+  String _memoDocumentId(Memo memo) {
+    final syncId = memo.syncId;
+    if (syncId != null &&
+        syncId.isNotEmpty &&
+        !syncId.startsWith('legacy-memo-')) {
+      return syncId;
+    }
+    return memo.id?.toString() ?? _temporaryMemoId();
   }
 
   Future<Memo> _memoFromSnapshot(
@@ -802,20 +1042,17 @@ class FirebaseMapService {
     }
 
     final parsedId = int.tryParse(memoDoc.id);
-    final memoId = parsedId ??
+    final memoId =
+        parsedId ??
         (memoData['id'] is num ? (memoData['id'] as num).toInt() : null);
-    if (memoId == null) {
-      throw StateError('Memo document ${memoDoc.id} is missing an integer id');
-    }
-
     final discoveryTime = _parseTimestamp(memoData['discoveryTime']);
 
     final imageUrlsRaw = memoData['imageUrls'];
     final imageUrls = imageUrlsRaw is Iterable
         ? imageUrlsRaw
-            .map((entry) => entry.toString())
-            .where((entry) => entry.isNotEmpty)
-            .toList()
+              .map((entry) => entry.toString())
+              .where((entry) => entry.isNotEmpty)
+              .toList()
         : const <String>[];
     final localImages = <String>[];
     for (var i = 0; i < imageUrls.length; i++) {
@@ -862,8 +1099,8 @@ class FirebaseMapService {
       mushroomCapColor: memoData['mushroomCapColor']?.toString(),
       mushroomCapSurface: memoData['mushroomCapSurface']?.toString(),
       mushroomCapSize: memoData['mushroomCapSize']?.toString(),
-      mushroomCapUnderStructure:
-          memoData['mushroomCapUnderStructure']?.toString(),
+      mushroomCapUnderStructure: memoData['mushroomCapUnderStructure']
+          ?.toString(),
       mushroomGillFeature: memoData['mushroomGillFeature']?.toString(),
       mushroomStemPresence: memoData['mushroomStemPresence']?.toString(),
       mushroomStemShape: memoData['mushroomStemShape']?.toString(),
@@ -874,18 +1111,21 @@ class FirebaseMapService {
       mushroomHabitat: memoData['mushroomHabitat']?.toString(),
       mushroomGrowthPattern: memoData['mushroomGrowthPattern']?.toString(),
       layer: (memoData['layer'] as num?)?.toInt(),
+      syncId: memoData['syncId']?.toString() ?? memoDoc.id,
+      updatedAt: _parseTimestamp(memoData['updatedAt']),
     );
   }
 
   Future<_UploadedAssets> _uploadMemoAssets(
     String uid,
-    int mapId,
-    int? memoId,
+    String remoteMapId,
     Memo memo,
+    String generation,
   ) async {
-    final memoFolderName = memoId?.toString() ?? _temporaryMemoId();
-    final baseRef =
-        _storage.ref().child('users/$uid/maps/$mapId/memos/$memoFolderName');
+    final memoFolderName = _memoDocumentId(memo);
+    final baseRef = _storage.ref().child(
+      'users/$uid/maps/$remoteMapId/memos/$memoFolderName/generations/$generation',
+    );
 
     final imageUrls = <String>[];
     final imagePaths = memo.imagePaths ?? const <String>[];
@@ -901,8 +1141,7 @@ class FirebaseMapService {
         asset.bytes,
         SettableMetadata(contentType: asset.contentType),
       );
-      final url = await imageRef.getDownloadURL();
-      imageUrls.add(url);
+      imageUrls.add(_storageUri(imageRef));
     }
 
     String? audioUrl;
@@ -919,7 +1158,7 @@ class FirebaseMapService {
           asset.bytes,
           SettableMetadata(contentType: asset.contentType),
         );
-        audioUrl = await audioRef.getDownloadURL();
+        audioUrl = _storageUri(audioRef);
       }
     }
 
@@ -950,7 +1189,7 @@ class FirebaseMapService {
     }
 
     if (kIsWeb) {
-      debugPrint('Cannot read local file path on the web: $path');
+      appLog('Cannot read local file path on the web: $path');
       return null;
     }
 
@@ -995,6 +1234,10 @@ class FirebaseMapService {
     }
   }
 
+  String _storageUri(Reference reference) {
+    return 'gs://${reference.bucket}/${reference.fullPath}';
+  }
+
   Future<_ResolvedBinary?> _downloadBinaryFromUrl(
     String url, {
     required String defaultContentType,
@@ -1012,7 +1255,7 @@ class FirebaseMapService {
         contentType: contentType,
       );
     } catch (error) {
-      debugPrint('Failed to download binary from $url: $error');
+      appLog('Failed to download binary from $url: $error');
       return null;
     }
   }
@@ -1055,13 +1298,27 @@ class FirebaseMapService {
       return 'data:${asset.contentType};base64,$encoded';
     } else {
       final directory = await getApplicationDocumentsDirectory();
-      final extension =
-          _extensionForContent(asset.contentType, fallback: '.aac');
+      final extension = _extensionForContent(
+        asset.contentType,
+        fallback: '.aac',
+      );
       final fileName =
           'firebase_audio_${_sanitizeForFile(mapId.toString())}_${_sanitizeForFile(memoKey)}$extension';
       final file = File('${directory.path}/$fileName');
       await file.writeAsBytes(asset.bytes, flush: true);
       return file.path;
+    }
+  }
+
+  Future<void> _deleteLocalFilesBestEffort(Iterable<String> paths) async {
+    if (kIsWeb) return;
+    for (final path in paths.toSet()) {
+      try {
+        final file = File(path);
+        if (await file.exists()) await file.delete();
+      } catch (_) {
+        // Orphan cleanup is best effort and must not hide the download error.
+      }
     }
   }
 

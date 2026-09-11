@@ -1,5 +1,6 @@
+import '../utils/app_logger.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode;
+import 'package:flutter/foundation.dart' show kIsWeb;
 // import 'package:geolocator/geolocator.dart';  // 一時的に無効化
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
@@ -12,6 +13,8 @@ import '../utils/audio_service.dart';
 import '../utils/image_helper.dart';
 import 'location_picker_screen.dart';
 import '../utils/default_values.dart';
+import '../utils/feature_flags.dart';
+import '../utils/theme_provider.dart';
 
 class AddMemoScreen extends StatefulWidget {
   final double? initialLatitude;
@@ -20,15 +23,15 @@ class AddMemoScreen extends StatefulWidget {
   final int? layer;
 
   const AddMemoScreen({
-    Key? key,
+    super.key,
     this.initialLatitude,
     this.initialLongitude,
     this.mapId,
     this.layer,
-  }) : super(key: key);
+  });
 
   @override
-  _AddMemoScreenState createState() => _AddMemoScreenState();
+  State<AddMemoScreen> createState() => _AddMemoScreenState();
 }
 
 class _AddMemoScreenState extends State<AddMemoScreen> {
@@ -52,11 +55,13 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
   // AI機能用の状態変数
   bool _isAnalyzing = false;
   File? _selectedImage; // AI分析用の一時的な画像（保持）
-  List<String> _imagePaths = []; // 保存済み画像パスのリスト
+  final List<String> _imagePaths = []; // 保存済み画像パスのリスト
   String? _audioPath;
   bool _isRecording = false;
   bool _isPlaying = false;
   bool _isTranscribing = false; // 音声文字起こし中のフラグ
+  bool _allowPop = false;
+  bool _didSave = false;
 
   // キノコ詳細情報の状態変数
   String? _selectedMushroomHabitat;
@@ -109,19 +114,20 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
   Future<void> _loadMaps() async {
     try {
       final maps = await DatabaseHelper.instance.readAllMaps();
-      print('読み込んだ地図数: ${maps.length}');
+      appLog('読み込んだ地図数: ${maps.length}');
       if (maps.isNotEmpty) {
-        print(
-            '地図一覧: ${maps.map((m) => 'ID:${m.id} タイトル:${m.title}').join(', ')}');
+        appLog(
+          '地図一覧: ${maps.map((m) => 'ID:${m.id} タイトル:${m.title}').join(', ')}',
+        );
       }
-      print('初期選択されたMapID: $_selectedMapId');
+      appLog('初期選択されたMapID: $_selectedMapId');
 
       // IDがnullの地図をチェック
       final mapsWithNullId = maps.where((map) => map.id == null).toList();
       if (mapsWithNullId.isNotEmpty) {
-        print('警告: IDがnullの地図が${mapsWithNullId.length}個見つかりました');
+        appLog('警告: IDがnullの地図が${mapsWithNullId.length}個見つかりました');
         for (final map in mapsWithNullId) {
-          print('  - タイトル: ${map.title}, imagePath: ${map.imagePath}');
+          appLog('  - タイトル: ${map.title}, imagePath: ${map.imagePath}');
         }
       }
 
@@ -130,20 +136,21 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         // 初期選択されたmapIdが実際の地図リストに存在するかチェック
         if (_selectedMapId != null) {
           final mapExists = _maps.any((map) => map.id == _selectedMapId);
-          print('選択されたMapIDが存在するか: $mapExists');
+          appLog('選択されたMapIDが存在するか: $mapExists');
           if (!mapExists) {
             // 存在しない場合はnullに設定（「地図を選択しない」を選択）
-            print('選択されたMapIDが存在しないため、nullに設定します');
+            appLog('選択されたMapIDが存在しないため、nullに設定します');
             _selectedMapId = null;
           }
         }
       });
-      print('最終的な選択MapID: $_selectedMapId');
-      print(
-          '有効な地図数（IDがnullでない）: ${maps.where((map) => map.id != null).length}');
+      appLog('最終的な選択MapID: $_selectedMapId');
+      appLog(
+        '有効な地図数（IDがnullでない）: ${maps.where((map) => map.id != null).length}',
+      );
     } catch (e) {
       // エラーは無視（地図が存在しない場合もある）
-      print('地図の読み込みでエラーが発生しました: $e');
+      appLog('地図の読み込みでエラーが発生しました: $e');
     }
   }
 
@@ -176,6 +183,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
     try {
       // 利用可能な地図を取得
       final maps = await DatabaseHelper.instance.readAllMaps();
+      if (!mounted) return;
       MapInfo? selectedMap;
 
       // デフォルトの地図を選択（選択された地図がある場合はそれを使用）
@@ -198,6 +206,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
           ),
         ),
       );
+      if (!mounted) return;
 
       if (result != null) {
         setState(() {
@@ -215,14 +224,13 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
           ),
         );
       }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('位置選択中にエラーが発生しました: $e')),
-      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('位置を設定できませんでした。再試行してください。')));
     } finally {
-      setState(() {
-        _isLocationLoading = false;
-      });
+      if (mounted) setState(() => _isLocationLoading = false);
     }
   }
 
@@ -233,12 +241,14 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
       firstDate: DateTime(2000),
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
+    if (!mounted) return;
 
     if (date != null) {
       final time = await showTimePicker(
         context: context,
         initialTime: TimeOfDay.fromDateTime(_discoveryTime ?? DateTime.now()),
       );
+      if (!mounted) return;
 
       if (time != null) {
         setState(() {
@@ -255,17 +265,18 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
   }
 
   Future<void> _saveMemo() async {
+    if (_isSaving) return;
     if (_titleController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('タイトルを入力してください')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('タイトルを入力してください')));
       return;
     }
 
     if (_selectedCategory == null || _selectedCategory == 'カテゴリを選択してください') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('カテゴリを選択してください')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('カテゴリを選択してください')));
       return;
     }
 
@@ -297,6 +308,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
     if (shouldSave != true) {
       return;
     }
+    if (!mounted) return;
 
     setState(() {
       _isSaving = true;
@@ -304,8 +316,9 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
     try {
       // 同じ地図の既存のメモを取得して次のピン番号を決定
-      final existingMemos =
-          await DatabaseHelper.instance.readMemosByMapId(_selectedMapId);
+      final existingMemos = await DatabaseHelper.instance.readMemosByMapId(
+        _selectedMapId,
+      );
       final layerMemos = existingMemos
           .where((memo) => (memo.layer ?? 0) == (_layer ?? 0))
           .toList();
@@ -330,8 +343,9 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         specimenNumber: _specimenNumberController.text.trim().isEmpty
             ? null
             : _specimenNumberController.text.trim(),
-        category:
-            _selectedCategory == 'カテゴリを選択してください' ? null : _selectedCategory,
+        category: _selectedCategory == 'カテゴリを選択してください'
+            ? null
+            : _selectedCategory,
         notes: _notesController.text.trim().isEmpty
             ? null
             : _notesController.text.trim(),
@@ -351,20 +365,25 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
       final savedMemo = await DatabaseHelper.instance.create(memo);
       try {
-        await CollaborationSyncCoordinator.instance
-            .onLocalMemoCreated(savedMemo);
+        await CollaborationSyncCoordinator.instance.onLocalMemoCreated(
+          savedMemo,
+        );
       } catch (error, stackTrace) {
-        debugPrint('Failed to sync memo creation: $error');
-        debugPrintStack(stackTrace: stackTrace);
+        appLog(
+          'Failed to queue memo creation: ${error.runtimeType}',
+          stackTrace,
+        );
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('共同編集への同期に失敗しました: $error'),
+            const SnackBar(
+              content: Text('端末には保存しました。クラウド同期は後で再試行します。'),
               backgroundColor: Colors.orange,
             ),
           );
         }
       }
+      if (!mounted) return;
+      _didSave = true;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('記録を保存しました！ピン番号: $nextPinNumber'),
@@ -372,18 +391,71 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         ),
       );
       Navigator.pop(context, true);
-    } catch (e) {
+    } catch (error, stackTrace) {
+      appLog('Memo save failed: ${error.runtimeType}', stackTrace);
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('保存に失敗しました: $e'),
+        const SnackBar(
+          content: Text('保存できませんでした。空き容量を確認して再試行してください。'),
           backgroundColor: Colors.red,
         ),
       );
     } finally {
-      setState(() {
-        _isSaving = false;
-      });
+      if (mounted) setState(() => _isSaving = false);
     }
+  }
+
+  bool get _hasDraft {
+    return _titleController.text.trim().isNotEmpty ||
+        _contentController.text.trim().isNotEmpty ||
+        _discovererController.text.trim().isNotEmpty ||
+        _specimenNumberController.text.trim().isNotEmpty ||
+        _notesController.text.trim().isNotEmpty ||
+        _imagePaths.isNotEmpty ||
+        _audioPath != null ||
+        _selectedCategory != _categories.first ||
+        _selectedMushroomHabitat != null ||
+        _selectedMushroomGrowthPattern != null ||
+        _selectedMapId != widget.mapId ||
+        _latitude != widget.initialLatitude ||
+        _longitude != widget.initialLongitude;
+  }
+
+  Future<void> _confirmDiscard() async {
+    if (_isSaving) return;
+    if (!_hasDraft) {
+      setState(() => _allowPop = true);
+      Navigator.of(context).pop();
+      return;
+    }
+    final discard = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('入力内容を破棄しますか？'),
+        content: const Text('保存していない入力と、この画面で追加した添付ファイルは削除されます。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('入力を続ける'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('破棄する'),
+          ),
+        ],
+      ),
+    );
+    if (discard != true || !mounted) return;
+    await _discardDraftMedia();
+    if (!mounted) return;
+    setState(() => _allowPop = true);
+    Navigator.of(context).pop();
+  }
+
+  Future<void> _discardDraftMedia() async {
+    await ImageHelper.deleteImages(List<String>.from(_imagePaths));
+    final audio = _audioPath;
+    if (audio != null) await AudioService.deleteAudioFile(audio);
   }
 
   String _formatDateTime(DateTime? dateTime) {
@@ -396,11 +468,11 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
     if (_selectedMushroomHabitat != null &&
         _selectedMushroomHabitat != '選択してください') {
-      details.add('発生場所: ${_selectedMushroomHabitat}');
+      details.add('発生場所: $_selectedMushroomHabitat');
     }
     if (_selectedMushroomGrowthPattern != null &&
         _selectedMushroomGrowthPattern != '選択してください') {
-      details.add('生育状態: ${_selectedMushroomGrowthPattern}');
+      details.add('生育状態: $_selectedMushroomGrowthPattern');
     }
 
     if (details.isEmpty) {
@@ -454,12 +526,12 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         '蜂',
         'アリ',
         '蟻',
-        'こんちゅう'
+        'こんちゅう',
       ],
       '鉱物': ['鉱物', '岩石', '石', '結晶', 'こうぶつ'],
       '化石': ['化石', 'かせき'],
       '地形': ['地形', '地質', '地層', 'ちけい'],
-      'その他': ['その他', 'そのた', 'other']
+      'その他': ['その他', 'そのた', 'other'],
     };
 
     for (final entry in categoryMap.entries) {
@@ -498,9 +570,11 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                   padding: const EdgeInsets.all(8),
                   margin: const EdgeInsets.only(bottom: 16),
                   decoration: BoxDecoration(
-                    color: Colors.orange.withOpacity(0.1),
+                    color: Colors.orange.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                    border: Border.all(
+                      color: Colors.orange.withValues(alpha: 0.3),
+                    ),
                   ),
                   child: const Row(
                     children: [
@@ -509,10 +583,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                       Expanded(
                         child: Text(
                           'AI画像分析機能は開発中です。分析精度や機能が変更される可能性があります。',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.orange,
-                          ),
+                          style: TextStyle(fontSize: 12, color: Colors.orange),
                         ),
                       ),
                     ],
@@ -540,6 +611,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
             ],
           ),
         );
+        if (!mounted) return;
 
         if (source == null) return;
       }
@@ -548,6 +620,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         source: source,
         imageQuality: 80,
       );
+      if (!mounted) return;
 
       if (image != null) {
         setState(() {
@@ -561,15 +634,16 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
             // Web環境では XFile から直接バイト配列を取得して分析
             if (kIsWeb) {
-              print('AddMemo Debug: Web環境で XFile から直接バイト配列を取得');
+              appLog('AddMemo Debug: Web環境で XFile から直接バイト配列を取得');
               final imageBytes = await image.readAsBytes();
-              print('AddMemo Debug: 画像バイト配列サイズ: ${imageBytes.length}');
+              appLog('AddMemo Debug: 画像バイト配列サイズ: ${imageBytes.length}');
               analysis = await AIService.analyzeImageBytes(imageBytes);
             } else {
               // ネイティブ環境では従来通り File を使用
-              print('AddMemo Debug: ネイティブ環境で File を使用');
+              appLog('AddMemo Debug: ネイティブ環境で File を使用');
               analysis = await AIService.analyzeImage(_selectedImage!);
             }
+            if (!mounted) return;
 
             List<String> updatedFields = [];
 
@@ -588,8 +662,9 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
             // カテゴリの自動選択（より柔軟なマッピング）
             if (analysis['category'] != null) {
-              String? matchedCategory =
-                  _findMatchingCategory(analysis['category']!);
+              String? matchedCategory = _findMatchingCategory(
+                analysis['category']!,
+              );
               if (matchedCategory != null) {
                 setState(() {
                   _selectedCategory = matchedCategory;
@@ -612,17 +687,19 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(message),
-                backgroundColor:
-                    updatedFields.isNotEmpty ? Colors.green : Colors.orange,
+                backgroundColor: updatedFields.isNotEmpty
+                    ? Colors.green
+                    : Colors.orange,
                 duration: const Duration(seconds: 4),
               ),
             );
           } catch (aiError) {
+            if (!mounted) return;
             // AI分析エラーの詳細な処理
-            print('AddMemo Debug: AI分析エラー詳細:');
-            print('AddMemo Debug: エラータイプ: ${aiError.runtimeType}');
-            print('AddMemo Debug: エラーメッセージ: $aiError');
-            print('AddMemo Debug: エラートレース: ${StackTrace.current}');
+            appLog('AddMemo Debug: AI分析エラー詳細:');
+            appLog('AddMemo Debug: エラータイプ: ${aiError.runtimeType}');
+            appLog('AddMemo Debug: エラーメッセージ: $aiError');
+            appLog('AddMemo Debug: エラートレース: ${StackTrace.current}');
 
             String errorMessage = '画像分析中にエラーが発生しました。';
 
@@ -649,7 +726,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.1),
+                          color: Colors.black.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Column(
@@ -658,17 +735,27 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                             const Text(
                               'デバッグ情報:',
                               style: TextStyle(
-                                  fontSize: 12, fontWeight: FontWeight.bold),
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
-                            Text('• エラータイプ: ${aiError.runtimeType}',
-                                style: const TextStyle(fontSize: 10)),
-                            Text('• Web環境: ${kIsWeb}',
-                                style: const TextStyle(fontSize: 10)),
-                            Text('• APIキー設定: ${AIService.isConfigured}',
-                                style: const TextStyle(fontSize: 10)),
+                            Text(
+                              '• エラータイプ: ${aiError.runtimeType}',
+                              style: const TextStyle(fontSize: 10),
+                            ),
+                            const Text(
+                              '• Web環境: $kIsWeb',
+                              style: TextStyle(fontSize: 10),
+                            ),
+                            Text(
+                              '• APIキー設定: ${AIService.isConfigured}',
+                              style: const TextStyle(fontSize: 10),
+                            ),
                             if (kIsWeb) ...[
-                              Text('• HTTPS接続: ${Uri.base.scheme == 'https'}',
-                                  style: const TextStyle(fontSize: 10)),
+                              Text(
+                                '• HTTPS接続: ${Uri.base.scheme == 'https'}',
+                                style: const TextStyle(fontSize: 10),
+                              ),
                             ],
                           ],
                         ),
@@ -692,9 +779,11 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         }
       }
     } catch (e) {
-      String errorMessage = '画像の選択に失敗しました: $e';
+      if (!mounted) return;
+      String errorMessage = '画像を選択できませんでした。再試行してください。';
       if (kIsWeb && e.toString().contains('NotAllowedError')) {
-        errorMessage = '画像の選択に失敗しました\n'
+        errorMessage =
+            '画像の選択に失敗しました\n'
             '• カメラへのアクセス許可を確認してください\n'
             '• ブラウザの設定でカメラが有効か確認してください\n'
             '• HTTPS接続を確認してください';
@@ -708,9 +797,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         ),
       );
     } finally {
-      setState(() {
-        _isAnalyzing = false;
-      });
+      if (mounted) setState(() => _isAnalyzing = false);
     }
   }
 
@@ -719,6 +806,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
     if (_isRecording) {
       // 録音停止
       final path = await AudioService.stopRecording();
+      if (!mounted) return;
       if (path != null) {
         setState(() {
           _audioPath = path;
@@ -734,6 +822,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
     } else {
       // 録音開始
       final success = await AudioService.startRecording();
+      if (!mounted) return;
       if (success) {
         setState(() {
           _isRecording = true;
@@ -747,7 +836,8 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
       } else {
         String errorMessage = '録音の開始に失敗しました';
         if (kIsWeb) {
-          errorMessage = '録音の開始に失敗しました\n'
+          errorMessage =
+              '録音の開始に失敗しました\n'
               '• HTTPS接続を確認してください\n'
               '• マイクへのアクセス許可を確認してください\n'
               '• ブラウザでマイクが有効か確認してください';
@@ -770,11 +860,13 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
     if (_isPlaying) {
       await AudioService.stopPlaying();
+      if (!mounted) return;
       setState(() {
         _isPlaying = false;
       });
     } else {
       final success = await AudioService.playAudio(_audioPath!);
+      if (!mounted) return;
       if (success) {
         setState(() {
           _isPlaying = true;
@@ -799,6 +891,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
   Future<void> _deleteAudio() async {
     if (_audioPath != null) {
       await AudioService.deleteAudioFile(_audioPath!);
+      if (!mounted) return;
       setState(() {
         _audioPath = null;
         _isPlaying = false;
@@ -833,6 +926,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
     try {
       final transcribedText = await AIService.transcribeAudio(_audioPath!);
+      if (!mounted) return;
 
       if (transcribedText != null && transcribedText.isNotEmpty) {
         // 既存のコンテンツに追記する形で文字起こし結果を追加
@@ -860,10 +954,11 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         );
       }
     } catch (e) {
-      print('AddMemo Debug: 音声文字起こしエラー詳細:');
-      print('AddMemo Debug: エラータイプ: ${e.runtimeType}');
-      print('AddMemo Debug: エラーメッセージ: $e');
-      print('AddMemo Debug: エラートレース: ${StackTrace.current}');
+      if (!mounted) return;
+      appLog('AddMemo Debug: 音声文字起こしエラー詳細:');
+      appLog('AddMemo Debug: エラータイプ: ${e.runtimeType}');
+      appLog('AddMemo Debug: エラーメッセージ: $e');
+      appLog('AddMemo Debug: エラートレース: ${StackTrace.current}');
 
       String errorMessage = '音声文字起こしでエラーが発生しました。';
 
@@ -891,7 +986,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.1),
+                    color: Colors.black.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Column(
@@ -900,17 +995,27 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                       const Text(
                         'デバッグ情報:',
                         style: TextStyle(
-                            fontSize: 12, fontWeight: FontWeight.bold),
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                      Text('• エラータイプ: ${e.runtimeType}',
-                          style: const TextStyle(fontSize: 10)),
-                      Text('• Web環境: ${kIsWeb}',
-                          style: const TextStyle(fontSize: 10)),
-                      Text('• APIキー設定: ${AIService.isConfigured}',
-                          style: const TextStyle(fontSize: 10)),
+                      Text(
+                        '• エラータイプ: ${e.runtimeType}',
+                        style: const TextStyle(fontSize: 10),
+                      ),
+                      const Text(
+                        '• Web環境: $kIsWeb',
+                        style: TextStyle(fontSize: 10),
+                      ),
+                      Text(
+                        '• APIキー設定: ${AIService.isConfigured}',
+                        style: const TextStyle(fontSize: 10),
+                      ),
                       if (kIsWeb) ...[
-                        Text('• HTTPS接続: ${Uri.base.scheme == 'https'}',
-                            style: const TextStyle(fontSize: 10)),
+                        Text(
+                          '• HTTPS接続: ${Uri.base.scheme == 'https'}',
+                          style: const TextStyle(fontSize: 10),
+                        ),
                       ],
                     ],
                   ),
@@ -923,9 +1028,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         ),
       );
     } finally {
-      setState(() {
-        _isTranscribing = false;
-      });
+      if (mounted) setState(() => _isTranscribing = false);
     }
   }
 
@@ -933,6 +1036,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
   Future<void> _addImage() async {
     try {
       final imagePath = await ImageHelper.pickAndSaveImage(context);
+      if (!mounted) return;
       if (imagePath != null) {
         setState(() {
           _imagePaths.add(imagePath);
@@ -944,10 +1048,11 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (_) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('画像の追加に失敗しました: $e'),
+        const SnackBar(
+          content: Text('画像を追加できませんでした。権限と空き容量を確認してください。'),
           backgroundColor: Colors.red,
         ),
       );
@@ -981,10 +1086,12 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
           ],
         ),
       );
+      if (!mounted) return;
 
       if (shouldDelete == true) {
         // ファイルを削除
         await ImageHelper.deleteImage(imagePath);
+        if (!mounted) return;
 
         // リストから削除
         setState(() {
@@ -1001,14 +1108,6 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
     }
   }
 
-  // 画像を全て削除（画面を閉じる時のクリーンアップ用）
-  Future<void> _clearAllImages() async {
-    for (final imagePath in _imagePaths) {
-      await ImageHelper.deleteImage(imagePath);
-    }
-    _imagePaths.clear();
-  }
-
   // AIアシスト機能
   Future<void> _showAIAssistant() async {
     if (!AIService.isConfigured) {
@@ -1023,7 +1122,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('🤖 AI アシスタント'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1033,7 +1132,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
               title: const Text('内容を改善'),
               subtitle: const Text('現在の内容をより詳細に改善します'),
               onTap: () async {
-                Navigator.pop(context);
+                Navigator.pop(dialogContext);
                 await _improveContent();
               },
             ),
@@ -1042,7 +1141,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
               title: const Text('質問する'),
               subtitle: const Text('フィールドワークについて質問できます'),
               onTap: () async {
-                Navigator.pop(context);
+                Navigator.pop(dialogContext);
                 await _askQuestion();
               },
             ),
@@ -1050,7 +1149,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('閉じる'),
           ),
         ],
@@ -1075,16 +1174,16 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
     });
 
     try {
-      final improved =
-          await AIService.improveMemoContent(_contentController.text);
+      final improved = await AIService.improveMemoContent(
+        _contentController.text,
+      );
+      if (!mounted) return;
 
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('改善提案（開発中）'),
-          content: SingleChildScrollView(
-            child: Text(improved),
-          ),
+          content: SingleChildScrollView(child: Text(improved)),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
@@ -1107,10 +1206,11 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         ),
       );
     } catch (e) {
-      print('AddMemo Debug: テキスト改善エラー詳細:');
-      print('AddMemo Debug: エラータイプ: ${e.runtimeType}');
-      print('AddMemo Debug: エラーメッセージ: $e');
-      print('AddMemo Debug: エラートレース: ${StackTrace.current}');
+      if (!mounted) return;
+      appLog('AddMemo Debug: テキスト改善エラー詳細:');
+      appLog('AddMemo Debug: エラータイプ: ${e.runtimeType}');
+      appLog('AddMemo Debug: エラーメッセージ: $e');
+      appLog('AddMemo Debug: エラートレース: ${StackTrace.current}');
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1118,7 +1218,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('改善提案の生成に失敗しました'),
+              const Text('改善提案の生成に失敗しました'),
               if (kIsWeb) ...[
                 const SizedBox(height: 4),
                 Text(
@@ -1134,9 +1234,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         ),
       );
     } finally {
-      setState(() {
-        _isAnalyzing = false;
-      });
+      if (mounted) setState(() => _isAnalyzing = false);
     }
   }
 
@@ -1146,7 +1244,7 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('AIに質問（開発中）'),
         content: TextField(
           controller: controller,
@@ -1158,14 +1256,14 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('キャンセル'),
           ),
           ElevatedButton(
             onPressed: () async {
               final question = controller.text.trim();
               if (question.isNotEmpty) {
-                Navigator.pop(context);
+                Navigator.pop(dialogContext);
 
                 setState(() {
                   _isAnalyzing = true;
@@ -1174,14 +1272,13 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                 try {
                   final memos = await DatabaseHelper.instance.readAllMemos();
                   final answer = await AIService.askQuestion(question, memos);
+                  if (!mounted) return;
 
                   showDialog(
                     context: context,
                     builder: (context) => AlertDialog(
                       title: Text('質問: $question'),
-                      content: SingleChildScrollView(
-                        child: Text(answer),
-                      ),
+                      content: SingleChildScrollView(child: Text(answer)),
                       actions: [
                         TextButton(
                           onPressed: () => Navigator.pop(context),
@@ -1191,10 +1288,11 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                     ),
                   );
                 } catch (e) {
-                  print('AddMemo Debug: 質問応答エラー詳細:');
-                  print('AddMemo Debug: エラータイプ: ${e.runtimeType}');
-                  print('AddMemo Debug: エラーメッセージ: $e');
-                  print('AddMemo Debug: エラートレース: ${StackTrace.current}');
+                  if (!mounted) return;
+                  appLog('AddMemo Debug: 質問応答エラー詳細:');
+                  appLog('AddMemo Debug: エラータイプ: ${e.runtimeType}');
+                  appLog('AddMemo Debug: エラーメッセージ: $e');
+                  appLog('AddMemo Debug: エラートレース: ${StackTrace.current}');
 
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -1202,13 +1300,15 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('回答の生成に失敗しました'),
+                          const Text('回答の生成に失敗しました'),
                           if (kIsWeb) ...[
                             const SizedBox(height: 4),
                             Text(
                               'デバッグ: ${e.runtimeType}',
                               style: const TextStyle(
-                                  fontSize: 10, color: Colors.white70),
+                                fontSize: 10,
+                                color: Colors.white70,
+                              ),
                             ),
                           ],
                         ],
@@ -1234,937 +1334,995 @@ class _AddMemoScreenState extends State<AddMemoScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: widget.initialLatitude != null && widget.initialLongitude != null
-            ? const Text('選択地点の記録')
-            : const Text('新しい記録'),
-        actions: [
-          IconButton(
-            icon: _isAnalyzing
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.smart_toy),
-            tooltip: 'AIアシスタント',
-            onPressed: _isAnalyzing ? null : _showAIAssistant,
-          ),
-          IconButton(
-            icon: _isSaving
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.save),
-            tooltip: '保存',
-            onPressed: _isSaving ? null : _saveMemo,
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 位置情報表示
-            if (widget.initialLatitude != null &&
-                widget.initialLongitude != null)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12.0),
-                margin: const EdgeInsets.only(bottom: 16.0),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  borderRadius: BorderRadius.circular(8.0),
-                  border: Border.all(color: Colors.blue.shade200),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.location_on, color: Colors.blue.shade600),
-                    const SizedBox(width: 8.0),
-                    Expanded(
-                      child: Text(
-                        'マップで選択した地点の記録を作成中\n緯度: ${widget.initialLatitude!.toStringAsFixed(6)}\n経度: ${widget.initialLongitude!.toStringAsFixed(6)}',
-                        style: TextStyle(
-                          color: Colors.blue.shade800,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+    return PopScope(
+      canPop: _allowPop || _didSave || !_hasDraft,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _confirmDiscard();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title:
+              widget.initialLatitude != null && widget.initialLongitude != null
+              ? const Text('選択地点の記録')
+              : const Text('新しい記録'),
+          actions: [
+            if (FeatureFlags.aiEnabled)
+              IconButton(
+                icon: _isAnalyzing
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.smart_toy),
+                tooltip: 'AIアシスタント',
+                onPressed: _isAnalyzing ? null : _showAIAssistant,
               ),
-
-            // 基本情報
-            const Text('基本情報',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-
-            TextField(
-              controller: _titleController,
-              decoration: const InputDecoration(
-                labelText: 'タイトル *',
-                border: OutlineInputBorder(),
-                helperText: '必須項目',
-              ),
+            IconButton(
+              icon: _isSaving
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.save),
+              tooltip: '保存',
+              onPressed: _isSaving ? null : _saveMemo,
             ),
-            const SizedBox(height: 16),
-
-            // カテゴリ選択
-            DropdownButtonFormField<String>(
-              value: _selectedCategory,
-              decoration: const InputDecoration(
-                labelText: 'カテゴリ',
-                border: OutlineInputBorder(),
-              ),
-              items: _categories.map((category) {
-                return DropdownMenuItem(
-                  value: category,
-                  child: Text(category),
-                );
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedCategory = value;
-                  // カテゴリが変更された場合、キノコの詳細情報をリセット
-                  if (value != 'キノコ') {
-                    _selectedMushroomHabitat = null;
-                    _selectedMushroomGrowthPattern = null;
-                  }
-                });
-              },
-            ),
-            const SizedBox(height: 16),
-
-            // キノコが選択された場合の詳細フィールド
-            if (_selectedCategory == 'キノコ') ...[
-              Card(
-                color: Colors.orange.shade50,
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.eco, color: Colors.orange.shade700),
-                          const SizedBox(width: 8),
-                          Text(
-                            'キノコの詳細情報',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 18,
-                              color: Colors.orange.shade700,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-
-                      // 発生場所
-                      DropdownButtonFormField<String>(
-                        value: _selectedMushroomHabitat,
-                        decoration: const InputDecoration(
-                          labelText: '発生場所',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: _mushroomHabitatOptions.map((habitat) {
-                          return DropdownMenuItem(
-                            value: habitat,
-                            child: Text(habitat),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedMushroomHabitat = value;
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 12),
-
-                      // 生育状態
-                      DropdownButtonFormField<String>(
-                        value: _selectedMushroomGrowthPattern,
-                        decoration: const InputDecoration(
-                          labelText: '生育状態',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: _mushroomGrowthPatternOptions.map((pattern) {
-                          return DropdownMenuItem(
-                            value: pattern,
-                            child: Text(pattern),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedMushroomGrowthPattern = value;
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // 発見時間
-            InkWell(
-              onTap: _selectDateTime,
-              child: InputDecorator(
-                decoration: const InputDecoration(
-                  labelText: '発見日時',
-                  border: OutlineInputBorder(),
-                  suffixIcon: Icon(Icons.calendar_today),
-                ),
-                child: Text(_formatDateTime(_discoveryTime)),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // 発見者
-            TextField(
-              controller: _discovererController,
-              decoration: const InputDecoration(
-                labelText: '発見者',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // 標本番号
-            TextField(
-              controller: _specimenNumberController,
-              decoration: const InputDecoration(
-                labelText: '標本番号',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // 地図選択
-            if (_maps.isNotEmpty) ...[
-              DropdownButtonFormField<int?>(
-                key: ValueKey(_maps.length), // 地図リスト変更時に再構築
-                value: _selectedMapId,
-                decoration: const InputDecoration(
-                  labelText: '地図',
-                  border: OutlineInputBorder(),
-                  helperText: 'この記録を関連付ける地図を選択',
-                ),
-                items: [
-                  const DropdownMenuItem<int?>(
-                    value: null,
-                    child: Text('地図を選択しない'),
-                  ),
-                  // IDがnullでない地図のみを表示
-                  ..._maps.where((map) => map.id != null).map((map) {
-                    return DropdownMenuItem<int?>(
-                      value: map.id,
-                      child: Text(map.title),
-                    );
-                  }).toList(),
-                ],
-                onChanged: (value) {
-                  setState(() {
-                    _selectedMapId = value;
-                  });
-                },
-              ),
-            ] else ...[
-              // 地図がない場合の表示
-              Container(
-                padding: const EdgeInsets.all(16.0),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade300),
-                  borderRadius: BorderRadius.circular(4.0),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '地図',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '使用可能な地図がありません',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.grey.shade700,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '地図を作成してから記録を関連付けることができます',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            const SizedBox(height: 24),
-
-            // 詳細情報
-            const Text('詳細情報',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-
-            TextField(
-              controller: _contentController,
-              decoration: const InputDecoration(
-                labelText: '内容・説明',
-                border: OutlineInputBorder(),
-                alignLabelWithHint: true,
-              ),
-              maxLines: 4,
-              textAlignVertical: TextAlignVertical.top,
-            ),
-            const SizedBox(height: 16),
-
-            // AI機能セクション
-            Card(
-              color: Colors.blue.shade50,
-              child: Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.smart_toy, color: Colors.blue.shade700),
-                        const SizedBox(width: 8),
-                        Text(
-                          'AI機能',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.blue.shade700,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Web環境での画像選択についての説明
-                    if (kIsWeb) ...[
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(8),
-                        margin: const EdgeInsets.only(bottom: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.green.shade50,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.green.shade200),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(Icons.info,
-                                    color: Colors.green.shade600, size: 16),
-                                const SizedBox(width: 4),
-                                Text(
-                                  'Web版画像分析について',
-                                  style: TextStyle(
-                                    color: Colors.green.shade700,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '• カメラ撮影とギャラリー選択が利用可能\n• HTTPS接続でカメラアクセス可能${_isHttpsConnection() ? ' ✓' : ' ⚠️'}\n• iPhoneでは設定でカメラ許可が必要',
-                              style: TextStyle(
-                                color: Colors.green.shade600,
-                                fontSize: 10,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-
-                    // 画像分析ボタン
-                    SizedBox(
+          ],
+        ),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 840),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 位置情報表示
+                  if (widget.initialLatitude != null &&
+                      widget.initialLongitude != null)
+                    Container(
                       width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: _isAnalyzing ? null : _pickAndAnalyzeImage,
-                        icon: _isAnalyzing
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.camera_alt),
-                        label: Text(_isAnalyzing
-                            ? '分析中...'
-                            : kIsWeb
-                                ? '📸 画像を選択してAI分析'
-                                : '📸 写真を撮影してAI分析'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
-                          foregroundColor: Colors.white,
-                        ),
+                      padding: const EdgeInsets.all(12.0),
+                      margin: const EdgeInsets.only(bottom: 16.0),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8.0),
+                        border: Border.all(color: Colors.blue.shade200),
                       ),
-                    ),
-
-                    if (_selectedImage != null) ...[
-                      const SizedBox(height: 8),
-                      Container(
-                        height: 100,
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.file(
-                            _selectedImage!,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.blue.shade100,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.blue.shade300),
-                        ),
-                        child: Text(
-                          'AI分析用の画像（この画像は保存されません）',
-                          style: TextStyle(
-                            color: Colors.blue.shade700,
-                            fontSize: 12,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ],
-
-                    const SizedBox(height: 12),
-
-                    // 音声録音セクション
-                    if (kIsWeb) ...[
-                      // Web環境向けの説明
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(8),
-                        margin: const EdgeInsets.only(bottom: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.blue.shade50,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.blue.shade200),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(Icons.info,
-                                    color: Colors.blue.shade600, size: 16),
-                                const SizedBox(width: 4),
-                                Text(
-                                  'Web版音声録音について',
-                                  style: TextStyle(
-                                    color: Colors.blue.shade700,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '• HTTPS接続が必要です${_isHttpsConnection() ? ' ✓' : ' ⚠️'}\n• マイクへのアクセス許可が必要です\n• 初回使用時にブラウザで許可してください',
+                      child: Row(
+                        children: [
+                          Icon(Icons.location_on, color: Colors.blue.shade600),
+                          const SizedBox(width: 8.0),
+                          Expanded(
+                            child: Text(
+                              'マップで選択した地点の記録を作成中\n緯度: ${widget.initialLatitude!.toStringAsFixed(6)}\n経度: ${widget.initialLongitude!.toStringAsFixed(6)}',
                               style: TextStyle(
-                                color: Colors.blue.shade600,
-                                fontSize: 10,
+                                color: Colors.blue.shade800,
+                                fontSize: 12,
                               ),
                             ),
-                          ],
-                        ),
-                      ),
-                    ],
-
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: _toggleRecording,
-                            icon: Icon(_isRecording ? Icons.stop : Icons.mic),
-                            label: Text(_isRecording
-                                ? '🎙️ 録音停止'
-                                : kIsWeb
-                                    ? '🎙️ Web音声録音'
-                                    : '🎙️ 音声録音'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor:
-                                  _isRecording ? Colors.red : Colors.green,
-                              foregroundColor: Colors.white,
-                            ),
-                          ),
-                        ),
-                        if (_audioPath != null) ...[
-                          const SizedBox(width: 8),
-                          IconButton(
-                            onPressed: _togglePlayback,
-                            icon: Icon(
-                                _isPlaying ? Icons.pause : Icons.play_arrow),
-                            color: Colors.blue,
-                            tooltip: _isPlaying ? '再生停止' : '再生',
-                          ),
-                          IconButton(
-                            onPressed: _deleteAudio,
-                            icon: const Icon(Icons.delete),
-                            color: Colors.red,
-                            tooltip: '削除',
                           ),
                         ],
-                      ],
+                      ),
                     ),
 
-                    // 音声文字起こしボタン
-                    if (_audioPath != null) ...[
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: _isTranscribing ? null : _transcribeAudio,
-                          icon: _isTranscribing
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.text_fields),
-                          label: Text(_isTranscribing
-                              ? '文字起こし中...'
-                              : '🤖 音声を文字起こし（開発中）'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.purple,
-                            foregroundColor: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ],
+                  // 基本情報
+                  const Text(
+                    '基本情報',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
 
-                    if (_audioPath != null) ...[
-                      const SizedBox(height: 8),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.green.shade100,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.green.shade300),
-                        ),
+                  TextField(
+                    controller: _titleController,
+                    decoration: const InputDecoration(
+                      labelText: 'タイトル *',
+                      border: OutlineInputBorder(),
+                      helperText: '必須項目',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // カテゴリ選択
+                  DropdownButtonFormField<String>(
+                    initialValue: _selectedCategory,
+                    decoration: const InputDecoration(
+                      labelText: 'カテゴリ',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: _categories.map((category) {
+                      return DropdownMenuItem(
+                        value: category,
+                        child: Text(category),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedCategory = value;
+                        // カテゴリが変更された場合、キノコの詳細情報をリセット
+                        if (value != 'キノコ') {
+                          _selectedMushroomHabitat = null;
+                          _selectedMushroomGrowthPattern = null;
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 16),
+
+                  // キノコが選択された場合の詳細フィールド
+                  if (_selectedCategory == 'キノコ') ...[
+                    Card(
+                      color: Colors.orange.shade50,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(
                               children: [
-                                Icon(Icons.audiotrack,
-                                    color: Colors.green.shade700),
+                                Icon(Icons.eco, color: Colors.orange.shade700),
                                 const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    '音声メモが録音されました',
-                                    style: TextStyle(
-                                      color: Colors.green.shade700,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                                Text(
+                                  'キノコの詳細情報',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 18,
+                                    color: Colors.orange.shade700,
                                   ),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '「音声を文字起こし」ボタンでAIによる自動文字起こしができます（開発中）',
-                              style: TextStyle(
-                                color: Colors.green.shade600,
-                                fontSize: 11,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                            const SizedBox(height: 16),
 
-                    if (_isTranscribing) ...[
-                      const SizedBox(height: 8),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.purple.shade100,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.purple.shade300),
-                        ),
-                        child: Row(
-                          children: [
-                            SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.purple.shade700,
+                            // 発生場所
+                            DropdownButtonFormField<String>(
+                              initialValue: _selectedMushroomHabitat,
+                              decoration: const InputDecoration(
+                                labelText: '発生場所',
+                                border: OutlineInputBorder(),
                               ),
+                              items: _mushroomHabitatOptions.map((habitat) {
+                                return DropdownMenuItem(
+                                  value: habitat,
+                                  child: Text(habitat),
+                                );
+                              }).toList(),
+                              onChanged: (value) {
+                                setState(() {
+                                  _selectedMushroomHabitat = value;
+                                });
+                              },
                             ),
-                            const SizedBox(width: 8),
-                            Text(
-                              '音声を文字起こし中...',
-                              style: TextStyle(
-                                color: Colors.purple.shade700,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                            const SizedBox(height: 12),
 
-                    if (_isRecording) ...[
-                      const SizedBox(height: 8),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.red.shade100,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.red.shade300),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.fiber_manual_record,
-                                color: Colors.red.shade700),
-                            const SizedBox(width: 8),
-                            Text(
-                              '録音中...',
-                              style: TextStyle(
-                                color: Colors.red.shade700,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
+                            // 生育状態
+                            DropdownButtonFormField<String>(
+                              initialValue: _selectedMushroomGrowthPattern,
+                              decoration: const InputDecoration(
+                                labelText: '生育状態',
+                                border: OutlineInputBorder(),
                               ),
+                              items: _mushroomGrowthPatternOptions.map((
+                                pattern,
+                              ) {
+                                return DropdownMenuItem(
+                                  value: pattern,
+                                  child: Text(pattern),
+                                );
+                              }).toList(),
+                              onChanged: (value) {
+                                setState(() {
+                                  _selectedMushroomGrowthPattern = value;
+                                });
+                              },
                             ),
+                            const SizedBox(height: 12),
                           ],
                         ),
                       ),
-                    ],
+                    ),
+                    const SizedBox(height: 16),
                   ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
 
-            // 画像管理セクション
-            Card(
-              color: Colors.green.shade50,
-              child: Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.photo_library, color: Colors.green.shade700),
-                        const SizedBox(width: 8),
-                        Text(
-                          '画像添付 (${_imagePaths.length}枚)',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green.shade700,
-                          ),
+                  // 発見時間
+                  InkWell(
+                    onTap: _selectDateTime,
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: '発見日時',
+                        border: OutlineInputBorder(),
+                        suffixIcon: Icon(Icons.calendar_today),
+                      ),
+                      child: Text(_formatDateTime(_discoveryTime)),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // 発見者
+                  TextField(
+                    controller: _discovererController,
+                    decoration: const InputDecoration(
+                      labelText: '発見者',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // 標本番号
+                  TextField(
+                    controller: _specimenNumberController,
+                    decoration: const InputDecoration(
+                      labelText: '標本番号',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // 地図選択
+                  if (_maps.isNotEmpty) ...[
+                    DropdownButtonFormField<int?>(
+                      key: ValueKey(_maps.length), // 地図リスト変更時に再構築
+                      initialValue: _selectedMapId,
+                      decoration: const InputDecoration(
+                        labelText: '地図',
+                        border: OutlineInputBorder(),
+                        helperText: 'この記録を関連付ける地図を選択',
+                      ),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('地図を選択しない'),
                         ),
-                        const Spacer(),
-                        IconButton(
-                          onPressed: _addImage,
-                          icon: const Icon(Icons.add_photo_alternate,
-                              color: Colors.green),
-                          tooltip: '画像を追加',
-                        ),
+                        // IDがnullでない地図のみを表示
+                        ..._maps.where((map) => map.id != null).map((map) {
+                          return DropdownMenuItem<int?>(
+                            value: map.id,
+                            child: Text(map.title),
+                          );
+                        }),
                       ],
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedMapId = value;
+                        });
+                      },
                     ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'メモに関連する画像を複数枚添付できます',
-                      style: TextStyle(fontSize: 12),
+                  ] else ...[
+                    // 地図がない場合の表示
+                    Container(
+                      padding: const EdgeInsets.all(16.0),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade300),
+                        borderRadius: BorderRadius.circular(4.0),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '地図',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '使用可能な地図がありません',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.grey.shade700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '地図を作成してから記録を関連付けることができます',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade500,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    if (_imagePaths.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      Container(
-                        height: 120,
-                        child: ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: _imagePaths.length,
-                          itemBuilder: (context, index) {
-                            final imagePath = _imagePaths[index];
-                            return Container(
-                              width: 120,
-                              margin: const EdgeInsets.only(right: 8),
-                              child: Stack(
+                  ],
+                  const SizedBox(height: 24),
+
+                  // 詳細情報
+                  const Text(
+                    '詳細情報',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+
+                  TextField(
+                    controller: _contentController,
+                    decoration: const InputDecoration(
+                      labelText: '内容・説明',
+                      border: OutlineInputBorder(),
+                      alignLabelWithHint: true,
+                    ),
+                    maxLines: 4,
+                    textAlignVertical: TextAlignVertical.top,
+                  ),
+                  const SizedBox(height: 16),
+
+                  // AI機能セクション
+                  Card(
+                    color: Colors.blue.shade50,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.attach_file,
+                                color: Colors.blue.shade700,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                '写真・音声',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blue.shade700,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+
+                          // Web環境での画像選択についての説明
+                          if (FeatureFlags.aiEnabled && kIsWeb) ...[
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(8),
+                              margin: const EdgeInsets.only(bottom: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.green.shade50,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: Colors.green.shade200,
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  // 画像
-                                  Container(
-                                    width: 120,
-                                    height: 120,
-                                    decoration: BoxDecoration(
-                                      border: Border.all(
-                                          color: Colors.grey.shade300),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: ImageHelper.buildImageWidget(
-                                        imagePath,
-                                        fit: BoxFit.cover,
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.info,
+                                        color: Colors.green.shade600,
+                                        size: 16,
                                       ),
-                                    ),
-                                  ),
-                                  // 削除ボタン
-                                  Positioned(
-                                    top: 4,
-                                    right: 4,
-                                    child: GestureDetector(
-                                      onTap: () => _removeImage(index),
-                                      child: Container(
-                                        width: 24,
-                                        height: 24,
-                                        decoration: BoxDecoration(
-                                          color: Colors.red,
-                                          borderRadius:
-                                              BorderRadius.circular(12),
-                                        ),
-                                        child: const Icon(
-                                          Icons.close,
-                                          color: Colors.white,
-                                          size: 16,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  // 画像番号
-                                  Positioned(
-                                    bottom: 4,
-                                    left: 4,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black54,
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: Text(
-                                        '${index + 1}',
-                                        style: const TextStyle(
-                                          color: Colors.white,
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Web版画像分析について',
+                                        style: TextStyle(
+                                          color: Colors.green.shade700,
                                           fontSize: 12,
                                           fontWeight: FontWeight.bold,
                                         ),
                                       ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '• カメラ撮影とギャラリー選択が利用可能\n• HTTPS接続でカメラアクセス可能${_isHttpsConnection() ? ' ✓' : ' ⚠️'}\n• iPhoneでは設定でカメラ許可が必要',
+                                    style: TextStyle(
+                                      color: Colors.green.shade600,
+                                      fontSize: 10,
                                     ),
                                   ),
                                 ],
                               ),
-                            );
-                          },
-                        ),
-                      ),
-                    ] else ...[
-                      const SizedBox(height: 12),
-                      Container(
-                        width: double.infinity,
-                        height: 60,
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                              color: Colors.grey.shade300,
-                              style: BorderStyle.solid),
-                          borderRadius: BorderRadius.circular(8),
-                          color: Colors.grey.shade50,
-                        ),
-                        child: InkWell(
-                          onTap: _addImage,
-                          borderRadius: BorderRadius.circular(8),
-                          child: const Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
+                            ),
+                          ],
+
+                          // 画像分析ボタン
+                          if (FeatureFlags.aiEnabled)
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: _isAnalyzing
+                                    ? null
+                                    : _pickAndAnalyzeImage,
+                                icon: _isAnalyzing
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Icon(Icons.camera_alt),
+                                label: Text(
+                                  _isAnalyzing
+                                      ? '分析中...'
+                                      : kIsWeb
+                                      ? '📸 画像を選択してAI分析'
+                                      : '📸 写真を撮影してAI分析',
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.blue,
+                                  foregroundColor: Colors.white,
+                                ),
+                              ),
+                            ),
+
+                          if (FeatureFlags.aiEnabled &&
+                              _selectedImage != null) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              height: 100,
+                              width: double.infinity,
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.grey),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.file(
+                                  _selectedImage!,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade100,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.blue.shade300),
+                              ),
+                              child: Text(
+                                'AI分析用の画像（この画像は保存されません）',
+                                style: TextStyle(
+                                  color: Colors.blue.shade700,
+                                  fontSize: 12,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ],
+
+                          const SizedBox(height: 12),
+
+                          // 音声録音セクション
+                          if (kIsWeb) ...[
+                            // Web環境向けの説明
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(8),
+                              margin: const EdgeInsets.only(bottom: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade50,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.blue.shade200),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.info,
+                                        color: Colors.blue.shade600,
+                                        size: 16,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Web版音声録音について',
+                                        style: TextStyle(
+                                          color: Colors.blue.shade700,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '• HTTPS接続が必要です${_isHttpsConnection() ? ' ✓' : ' ⚠️'}\n• マイクへのアクセス許可が必要です\n• 初回使用時にブラウザで許可してください',
+                                    style: TextStyle(
+                                      color: Colors.blue.shade600,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+
+                          Row(
                             children: [
-                              Icon(Icons.add_photo_alternate,
-                                  size: 24, color: Colors.grey),
-                              SizedBox(height: 4),
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: _toggleRecording,
+                                  icon: Icon(
+                                    _isRecording ? Icons.stop : Icons.mic,
+                                  ),
+                                  label: Text(
+                                    _isRecording
+                                        ? '🎙️ 録音停止'
+                                        : kIsWeb
+                                        ? '🎙️ Web音声録音'
+                                        : '🎙️ 音声録音',
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: _isRecording
+                                        ? Colors.red
+                                        : Colors.green,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                ),
+                              ),
+                              if (_audioPath != null) ...[
+                                const SizedBox(width: 8),
+                                IconButton(
+                                  onPressed: _togglePlayback,
+                                  icon: Icon(
+                                    _isPlaying ? Icons.pause : Icons.play_arrow,
+                                  ),
+                                  color: Colors.blue,
+                                  tooltip: _isPlaying ? '再生停止' : '再生',
+                                ),
+                                IconButton(
+                                  onPressed: _deleteAudio,
+                                  icon: const Icon(Icons.delete),
+                                  color: Colors.red,
+                                  tooltip: '削除',
+                                ),
+                              ],
+                            ],
+                          ),
+
+                          // 音声文字起こしボタン
+                          if (FeatureFlags.aiEnabled && _audioPath != null) ...[
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: _isTranscribing
+                                    ? null
+                                    : _transcribeAudio,
+                                icon: _isTranscribing
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Icon(Icons.text_fields),
+                                label: Text(
+                                  _isTranscribing
+                                      ? '文字起こし中...'
+                                      : '🤖 音声を文字起こし（開発中）',
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.purple,
+                                  foregroundColor: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ],
+
+                          if (_audioPath != null) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.green.shade100,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: Colors.green.shade300,
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.audiotrack,
+                                        color: Colors.green.shade700,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          '音声メモが録音されました',
+                                          style: TextStyle(
+                                            color: Colors.green.shade700,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    FeatureFlags.aiEnabled
+                                        ? '音声を文字起こして内容へ追加できます。'
+                                        : '音声はこの記録と一緒に端末へ保存されます。',
+                                    style: TextStyle(
+                                      color: Colors.green.shade600,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+
+                          if (FeatureFlags.aiEnabled && _isTranscribing) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.purple.shade100,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: Colors.purple.shade300,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.purple.shade700,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    '音声を文字起こし中...',
+                                    style: TextStyle(
+                                      color: Colors.purple.shade700,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+
+                          if (_isRecording) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade100,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.red.shade300),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.fiber_manual_record,
+                                    color: Colors.red.shade700,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    '録音中...',
+                                    style: TextStyle(
+                                      color: Colors.red.shade700,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // 画像管理セクション
+                  Card(
+                    color: Colors.green.shade50,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.photo_library,
+                                color: Colors.green.shade700,
+                              ),
+                              const SizedBox(width: 8),
                               Text(
-                                'タップして画像を追加',
-                                style:
-                                    TextStyle(color: Colors.grey, fontSize: 12),
+                                '画像添付 (${_imagePaths.length}枚)',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green.shade700,
+                                ),
+                              ),
+                              const Spacer(),
+                              IconButton(
+                                onPressed: _addImage,
+                                icon: const Icon(
+                                  Icons.add_photo_alternate,
+                                  color: Colors.green,
+                                ),
+                                tooltip: '画像を追加',
                               ),
                             ],
                           ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            TextField(
-              controller: _notesController,
-              decoration: const InputDecoration(
-                labelText: '備考',
-                border: OutlineInputBorder(),
-                alignLabelWithHint: true,
-              ),
-              maxLines: 3,
-              textAlignVertical: TextAlignVertical.top,
-            ),
-            const SizedBox(height: 24),
-
-            // 位置情報
-            const Text('位置情報',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          '位置情報',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        ElevatedButton.icon(
-                          onPressed:
-                              _isLocationLoading ? null : _selectLocation,
-                          icon: _isLocationLoading
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.map),
-                          label: const Text('位置設定'),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8.0),
-                    if (_latitude != null && _longitude != null)
-                      Text(
-                        '設定された位置：\n緯度: ${_latitude!.toStringAsFixed(6)}\n経度: ${_longitude!.toStringAsFixed(6)}',
-                        style: const TextStyle(fontSize: 12),
-                      )
-                    else
-                      const Text(
-                        '位置情報が設定されていません\n「位置設定」ボタンから地図で位置を選択してください',
-                        style: TextStyle(color: Colors.grey, fontSize: 12),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // 保存ボタン
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _isSaving ? null : _saveMemo,
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16.0),
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                ),
-                child: _isSaving
-                    ? const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(Colors.white),
-                            ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'メモに関連する画像を複数枚添付できます',
+                            style: TextStyle(fontSize: 12),
                           ),
-                          SizedBox(width: 8),
-                          Text('保存中...', style: TextStyle(fontSize: 16)),
-                        ],
-                      )
-                    : const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.save, size: 20),
-                          SizedBox(width: 8),
-                          Text('記録を保存', style: TextStyle(fontSize: 16)),
+                          if (_imagePaths.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              height: 120,
+                              child: ListView.builder(
+                                scrollDirection: Axis.horizontal,
+                                itemCount: _imagePaths.length,
+                                itemBuilder: (context, index) {
+                                  final imagePath = _imagePaths[index];
+                                  return Container(
+                                    width: 120,
+                                    margin: const EdgeInsets.only(right: 8),
+                                    child: Stack(
+                                      children: [
+                                        // 画像
+                                        Container(
+                                          width: 120,
+                                          height: 120,
+                                          decoration: BoxDecoration(
+                                            border: Border.all(
+                                              color: Colors.grey.shade300,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
+                                          ),
+                                          child: ClipRRect(
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
+                                            child: ImageHelper.buildImageWidget(
+                                              imagePath,
+                                              fit: BoxFit.cover,
+                                            ),
+                                          ),
+                                        ),
+                                        // 削除ボタン
+                                        Positioned(
+                                          top: 4,
+                                          right: 4,
+                                          child: GestureDetector(
+                                            onTap: () => _removeImage(index),
+                                            child: Container(
+                                              width: 24,
+                                              height: 24,
+                                              decoration: BoxDecoration(
+                                                color: Colors.red,
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                              ),
+                                              child: const Icon(
+                                                Icons.close,
+                                                color: Colors.white,
+                                                size: 16,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        // 画像番号
+                                        Positioned(
+                                          bottom: 4,
+                                          left: 4,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black54,
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                            ),
+                                            child: Text(
+                                              '${index + 1}',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ] else ...[
+                            const SizedBox(height: 12),
+                            Container(
+                              width: double.infinity,
+                              height: 60,
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: Colors.grey.shade300,
+                                  style: BorderStyle.solid,
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                                color: Colors.grey.shade50,
+                              ),
+                              child: InkWell(
+                                onTap: _addImage,
+                                borderRadius: BorderRadius.circular(8),
+                                child: const Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.add_photo_alternate,
+                                      size: 24,
+                                      color: Colors.grey,
+                                    ),
+                                    SizedBox(height: 4),
+                                    Text(
+                                      'タップして画像を追加',
+                                      style: TextStyle(
+                                        color: Colors.grey,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // 保存内容の説明
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12.0),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade50,
-                borderRadius: BorderRadius.circular(8.0),
-                border: Border.all(color: Colors.grey.shade300),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '保存される内容:',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '• タイトル: ${_titleController.text.trim().isEmpty ? "未入力" : _titleController.text.trim()}\n'
-                    '• カテゴリ: ${_selectedCategory ?? "未選択"}${_selectedCategory == 'キノコ' ? " (詳細情報入力済み)" : ""}\n'
-                    '• 発見日時: ${_formatDateTime(_discoveryTime)}\n'
-                    '• 発見者: ${_discovererController.text.trim().isEmpty ? "未入力" : _discovererController.text.trim()}\n'
-                    '• 位置情報: ${_latitude != null && _longitude != null ? "設定済み" : "未設定"}\n'
-                    '• 添付画像: ${_imagePaths.length}枚\n'
-                    '• 音声メモ: ${_audioPath != null ? "録音済み (文字起こし可能)" : "なし"}${_selectedCategory == 'キノコ' ? _getMushroomDetailsSummary() : ""}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey.shade700,
+                  const SizedBox(height: 16),
+
+                  TextField(
+                    controller: _notesController,
+                    decoration: const InputDecoration(
+                      labelText: '備考',
+                      border: OutlineInputBorder(),
+                      alignLabelWithHint: true,
+                    ),
+                    maxLines: 3,
+                    textAlignVertical: TextAlignVertical.top,
+                  ),
+                  const SizedBox(height: 24),
+
+                  // 位置情報
+                  const Text(
+                    '位置情報',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                '位置情報',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              ElevatedButton.icon(
+                                onPressed: _isLocationLoading
+                                    ? null
+                                    : _selectLocation,
+                                icon: _isLocationLoading
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Icon(Icons.map),
+                                label: const Text('位置設定'),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8.0),
+                          if (_latitude != null && _longitude != null)
+                            Text(
+                              '設定された位置：\n緯度: ${_latitude!.toStringAsFixed(6)}\n経度: ${_longitude!.toStringAsFixed(6)}',
+                              style: const TextStyle(fontSize: 12),
+                            )
+                          else
+                            const Text(
+                              '位置情報が設定されていません\n「位置設定」ボタンから地図で位置を選択してください',
+                              style: TextStyle(
+                                color: Colors.grey,
+                                fontSize: 12,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // 保存内容の説明
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12.0),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(8.0),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '保存される内容:',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '• タイトル: ${_titleController.text.trim().isEmpty ? "未入力" : _titleController.text.trim()}\n'
+                          '• カテゴリ: ${_selectedCategory ?? "未選択"}${_selectedCategory == 'キノコ' ? " (詳細情報入力済み)" : ""}\n'
+                          '• 発見日時: ${_formatDateTime(_discoveryTime)}\n'
+                          '• 発見者: ${_discovererController.text.trim().isEmpty ? "未入力" : _discovererController.text.trim()}\n'
+                          '• 位置情報: ${_latitude != null && _longitude != null ? "設定済み" : "未設定"}\n'
+                          '• 添付画像: ${_imagePaths.length}枚\n'
+                          '• 音声メモ: ${_audioPath != null ? "録音済み (文字起こし可能)" : "なし"}${_selectedCategory == 'キノコ' ? _getMushroomDetailsSummary() : ""}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
             ),
-          ],
+          ),
+        ),
+        bottomNavigationBar: SafeArea(
+          minimum: const EdgeInsets.all(AppSpacing.md),
+          child: FilledButton.icon(
+            onPressed: _isSaving ? null : _saveMemo,
+            icon: _isSaving
+                ? const SizedBox.square(
+                    dimension: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.save_outlined),
+            label: Text(_isSaving ? '保存中…' : '記録を保存'),
+          ),
         ),
       ),
     );

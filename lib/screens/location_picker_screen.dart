@@ -1,3 +1,4 @@
+import '../utils/app_logger.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -14,14 +15,14 @@ class LocationPickerScreen extends StatefulWidget {
   final MapInfo? mapInfo;
 
   const LocationPickerScreen({
-    Key? key,
+    super.key,
     this.initialLatitude,
     this.initialLongitude,
     this.mapInfo,
-  }) : super(key: key);
+  });
 
   @override
-  _LocationPickerScreenState createState() => _LocationPickerScreenState();
+  State<LocationPickerScreen> createState() => _LocationPickerScreenState();
 }
 
 class _LocationPickerScreenState extends State<LocationPickerScreen> {
@@ -66,7 +67,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
         }
       }
     } catch (e) {
-      print('地図ファイルの読み込み中にエラーが発生しました: $e');
+      appLog('地図ファイルの読み込み中にエラーが発生しました: $e');
     }
   }
 
@@ -75,8 +76,9 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
 
     if (widget.mapInfo != null) {
       // MapInfoがある場合は、そのIDでメモを読み込む
-      memos =
-          await DatabaseHelper.instance.readMemosByMapId(widget.mapInfo!.id);
+      memos = await DatabaseHelper.instance.readMemosByMapId(
+        widget.mapInfo!.id,
+      );
     } else {
       // MapInfoがない場合は、地図画像パスでメモを読み込む
       memos = await DatabaseHelper.instance.readMemosByMapPath(_customMapPath);
@@ -96,7 +98,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-            '位置を選択しました: (${x.toStringAsFixed(6)}, ${y.toStringAsFixed(6)})'),
+          '位置を選択しました: (${x.toStringAsFixed(6)}, ${y.toStringAsFixed(6)})',
+        ),
         duration: const Duration(seconds: 2),
         backgroundColor: Colors.green,
       ),
@@ -183,9 +186,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
               color: _selectedLatitude != null && _selectedLongitude != null
                   ? Colors.green.shade50
                   : Colors.grey.shade50,
-              border: Border(
-                bottom: BorderSide(color: Colors.grey.shade300),
-              ),
+              border: Border(bottom: BorderSide(color: Colors.grey.shade300)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -196,7 +197,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                       _selectedLatitude != null && _selectedLongitude != null
                           ? Icons.location_on
                           : Icons.location_off,
-                      color: _selectedLatitude != null &&
+                      color:
+                          _selectedLatitude != null &&
                               _selectedLongitude != null
                           ? Colors.green
                           : Colors.grey,
@@ -208,7 +210,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                           : '位置が未選択',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: _selectedLatitude != null &&
+                        color:
+                            _selectedLatitude != null &&
                                 _selectedLongitude != null
                             ? Colors.green.shade700
                             : Colors.grey.shade700,
@@ -230,10 +233,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                   const SizedBox(height: 4),
                   const Text(
                     '地図をタップして位置を選択してください',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey,
-                    ),
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ],
               ],
@@ -253,26 +253,16 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(
-                          Icons.map_outlined,
-                          size: 64,
-                          color: Colors.grey,
-                        ),
+                        Icon(Icons.map_outlined, size: 64, color: Colors.grey),
                         SizedBox(height: 16),
                         Text(
                           '地図が設定されていません',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: Colors.grey,
-                          ),
+                          style: TextStyle(fontSize: 16, color: Colors.grey),
                         ),
                         SizedBox(height: 8),
                         Text(
                           '地図を追加してから位置を選択してください',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey,
-                          ),
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
                         ),
                       ],
                     ),
@@ -286,7 +276,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
           color: Colors.white,
           boxShadow: [
             BoxShadow(
-              color: Colors.grey.withOpacity(0.3),
+              color: Colors.grey.withValues(alpha: 0.3),
               spreadRadius: 1,
               blurRadius: 4,
               offset: const Offset(0, -2),
@@ -309,8 +299,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
               child: ElevatedButton(
                 onPressed:
                     _selectedLatitude != null && _selectedLongitude != null
-                        ? _confirmLocationSelection
-                        : null,
+                    ? _confirmLocationSelection
+                    : null,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.blue,
                   foregroundColor: Colors.white,

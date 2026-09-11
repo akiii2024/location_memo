@@ -1,5 +1,5 @@
+import 'app_logger.dart';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -76,7 +76,7 @@ class ImageHelper {
       }
       return false;
     } catch (e) {
-      print('画像削除エラー: $e');
+      appLog('画像削除エラー: $e');
       return false;
     }
   }
@@ -142,10 +142,7 @@ class ImageHelper {
 
     // 角の丸みを適用
     if (borderRadius != null) {
-      return ClipRRect(
-        borderRadius: borderRadius,
-        child: imageWidget,
-      );
+      return ClipRRect(borderRadius: borderRadius, child: imageWidget);
     }
 
     return imageWidget;
@@ -164,18 +161,11 @@ class ImageHelper {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.broken_image,
-              size: 48,
-              color: Colors.grey,
-            ),
+            Icon(Icons.broken_image, size: 48, color: Colors.grey),
             SizedBox(height: 8),
             Text(
               '画像を読み込めません',
-              style: TextStyle(
-                color: Colors.grey,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: Colors.grey, fontSize: 12),
             ),
           ],
         ),
@@ -234,7 +224,7 @@ class ImageHelper {
 
       return null;
     } catch (e) {
-      print('画像選択エラー: $e');
+      appLog('画像選択エラー: $e');
       return null;
     }
   }

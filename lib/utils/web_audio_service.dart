@@ -1,15 +1,15 @@
+// ignore_for_file: deprecated_member_use, avoid_web_libraries_in_flutter
+// Flutter 3.35の正式対象であるJavaScriptビルド専用の条件付き実装。
+
+import 'app_logger.dart';
 import 'dart:html' as html;
-import 'dart:js_interop' as js;
-import 'dart:typed_data';
-import 'dart:convert';
 import 'dart:async';
 
 class WebAudioService {
   static html.MediaRecorder? _mediaRecorder;
   static html.AudioElement? _audioElement;
-  static List<html.Blob> _recordingChunks = [];
+  static final List<html.Blob> _recordingChunks = [];
   static html.MediaStream? _mediaStream;
-  static String? _currentRecordingData;
   static bool _isRecording = false;
   static bool _isPlaying = false;
   static Completer<String>? _recordingCompleter;
@@ -17,8 +17,7 @@ class WebAudioService {
   // Web Audio APIのサポート確認
   static bool isSupported() {
     try {
-      return html.window.navigator.mediaDevices != null &&
-             html.window.navigator.mediaDevices!.getUserMedia != null;
+      return html.window.navigator.mediaDevices != null;
     } catch (e) {
       return false;
     }
@@ -41,7 +40,7 @@ class WebAudioService {
 
       return true;
     } catch (e) {
-      print('マイク権限エラー: $e');
+      appLog('マイク権限エラー: $e');
       return false;
     }
   }
@@ -50,18 +49,18 @@ class WebAudioService {
   static Future<bool> startRecording() async {
     try {
       if (_isRecording) {
-        print('既に録音中です');
+        appLog('既に録音中です');
         return false;
       }
 
       if (!isSupported()) {
-        print('このブラウザではMediaRecorderがサポートされていません');
+        appLog('このブラウザではMediaRecorderがサポートされていません');
         return false;
       }
 
       // マイク権限の確認
       if (!await checkMicrophonePermission()) {
-        print('マイクの権限が必要です');
+        appLog('マイクの権限が必要です');
         return false;
       }
 
@@ -101,7 +100,7 @@ class WebAudioService {
 
       // エラーハンドリング
       _mediaRecorder!.addEventListener('error', (html.Event event) {
-        print('録音エラー: ${event.toString()}');
+        appLog('録音エラー: ${event.toString()}');
         _isRecording = false;
         if (!_recordingCompleter!.isCompleted) {
           _recordingCompleter!.completeError('録音エラーが発生しました');
@@ -112,10 +111,10 @@ class WebAudioService {
       _mediaRecorder!.start();
       _isRecording = true;
 
-      print('Web録音開始 (${mimeType.isEmpty ? 'default' : mimeType})');
+      appLog('Web録音開始 (${mimeType.isEmpty ? 'default' : mimeType})');
       return true;
     } catch (e) {
-      print('録音開始エラー: $e');
+      appLog('録音開始エラー: $e');
       _cleanupRecording();
       return false;
     }
@@ -125,7 +124,7 @@ class WebAudioService {
   static Future<String?> stopRecording() async {
     try {
       if (!_isRecording || _mediaRecorder == null) {
-        print('録音していません');
+        appLog('録音していません');
         return null;
       }
 
@@ -134,16 +133,17 @@ class WebAudioService {
 
       // 録音データの処理完了を待つ
       try {
-        final recordingData = await _recordingCompleter!.future
-            .timeout(const Duration(seconds: 5));
-        print('録音停止完了');
+        final recordingData = await _recordingCompleter!.future.timeout(
+          const Duration(seconds: 5),
+        );
+        appLog('録音停止完了');
         return recordingData;
       } catch (e) {
-        print('録音データ処理エラー: $e');
+        appLog('録音データ処理エラー: $e');
         return null;
       }
     } catch (e) {
-      print('録音停止エラー: $e');
+      appLog('録音停止エラー: $e');
       _cleanupRecording();
       return null;
     }
@@ -154,34 +154,33 @@ class WebAudioService {
     try {
       if (_recordingChunks.isNotEmpty) {
         final blob = html.Blob(_recordingChunks);
-        
+
         // Base64エンコードのためのFileReaderを使用
         final reader = html.FileReader();
-        
+
         reader.onLoad.listen((event) {
           final result = reader.result as String;
-          _currentRecordingData = result;
           if (!_recordingCompleter!.isCompleted) {
             _recordingCompleter!.complete(result);
           }
         });
-        
+
         reader.onError.listen((event) {
-          print('録音データ読み込みエラー');
+          appLog('録音データ読み込みエラー');
           if (!_recordingCompleter!.isCompleted) {
             _recordingCompleter!.completeError('録音データの読み込みに失敗しました');
           }
         });
-        
+
         reader.readAsDataUrl(blob);
       } else {
-        print('録音データがありません');
+        appLog('録音データがありません');
         if (!_recordingCompleter!.isCompleted) {
           _recordingCompleter!.completeError('録音データが空です');
         }
       }
     } catch (e) {
-      print('録音データ確定エラー: $e');
+      appLog('録音データ確定エラー: $e');
       if (!_recordingCompleter!.isCompleted) {
         _recordingCompleter!.completeError('録音データの処理に失敗しました');
       }
@@ -201,7 +200,7 @@ class WebAudioService {
       _recordingChunks.clear();
       _isRecording = false;
     } catch (e) {
-      print('録音リソースクリーンアップエラー: $e');
+      appLog('録音リソースクリーンアップエラー: $e');
     }
   }
 
@@ -219,12 +218,12 @@ class WebAudioService {
       // 再生終了時のイベントリスナー
       _audioElement!.addEventListener('ended', (html.Event event) {
         _isPlaying = false;
-        print('音声再生終了');
+        appLog('音声再生終了');
       });
 
       // エラーハンドリング
       _audioElement!.addEventListener('error', (html.Event event) {
-        print('音声再生エラー: ${event.toString()}');
+        appLog('音声再生エラー: ${event.toString()}');
         _isPlaying = false;
       });
 
@@ -233,19 +232,19 @@ class WebAudioService {
         try {
           await _audioElement!.play();
           _isPlaying = true;
-          print('音声再生開始');
+          appLog('音声再生開始');
         } catch (e) {
-          print('音声再生開始エラー: $e');
+          appLog('音声再生開始エラー: $e');
           _isPlaying = false;
         }
       });
 
       // 音声データの読み込み開始
       _audioElement!.load();
-      
+
       return true;
     } catch (e) {
-      print('音声再生エラー: $e');
+      appLog('音声再生エラー: $e');
       _isPlaying = false;
       return false;
     }
@@ -258,10 +257,10 @@ class WebAudioService {
         _audioElement!.pause();
         _audioElement!.currentTime = 0;
         _isPlaying = false;
-        print('音声再生停止');
+        appLog('音声再生停止');
       }
     } catch (e) {
-      print('音声停止エラー: $e');
+      appLog('音声停止エラー: $e');
     }
   }
 
@@ -279,11 +278,10 @@ class WebAudioService {
         _audioElement!.pause();
         _audioElement = null;
       }
-      _currentRecordingData = null;
       _isPlaying = false;
-      print('WebAudioService リソース解放完了');
+      appLog('WebAudioService リソース解放完了');
     } catch (e) {
-      print('WebAudioService dispose エラー: $e');
+      appLog('WebAudioService dispose エラー: $e');
     }
   }
 
@@ -306,4 +304,4 @@ class WebAudioService {
       return 'Unknown';
     }
   }
-} 
+}

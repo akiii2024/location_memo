@@ -72,6 +72,8 @@ app.*.map.json
 **/android/.gradle/
 **/android/local.properties
 **/android/key.properties
+**/android/**/*.jks
+**/android/**/*.keystore
 **/android/build/
 
 # iOS related
@@ -125,6 +127,8 @@ coverage/
 # Temporary files
 *.tmp
 *.temp
+node_modules/
+.firebase/
 
 # Environment files
 .env
@@ -137,6 +141,12 @@ coverage/
 
 # FVM (Flutter Version Management)
 .fvm/flutter_sdk
+.toolchains/
+.codex-recovery/
+.aab_inspect/
+.web_preview/
+.dart_appdata/
+.dart_localappdata/
 
 # Local configuration files
 local.properties
@@ -159,6 +169,7 @@ cache/
 user_data/
 
 # API keys and sensitive configuration
+firebase_options_base64.txt
 **/android/app/google-services.json
 **/ios/Runner/GoogleService-Info.plist
 **/lib/config/api_keys.dart
@@ -180,10 +191,6 @@ scripts/
 # Debug logs
 logs/
 debug.log
-
-# Firebase rules
-**/firebase/firestore.rules
-**/firebase/README.md
 
 # Documentation
 docs/

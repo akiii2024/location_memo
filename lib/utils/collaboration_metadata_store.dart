@@ -7,12 +7,16 @@ class CollaborationMetadata {
   final bool isOwner;
   final String? ownerEmail;
   final DateTime? registeredAt;
+  final String? remoteMapId;
+  final DateTime? lastSyncedAt;
 
   const CollaborationMetadata({
     required this.ownerUid,
     required this.isOwner,
     this.ownerEmail,
     this.registeredAt,
+    this.remoteMapId,
+    this.lastSyncedAt,
   });
 
   Map<String, dynamic> toJson() {
@@ -21,6 +25,8 @@ class CollaborationMetadata {
       'isOwner': isOwner,
       if (ownerEmail != null) 'ownerEmail': ownerEmail,
       if (registeredAt != null) 'registeredAt': registeredAt!.toIso8601String(),
+      if (remoteMapId != null) 'remoteMapId': remoteMapId,
+      if (lastSyncedAt != null) 'lastSyncedAt': lastSyncedAt!.toIso8601String(),
     };
   }
 
@@ -31,14 +37,21 @@ class CollaborationMetadata {
     }
     final registeredRaw = json['registeredAt'];
     DateTime? registeredAt;
+    DateTime? lastSyncedAt;
     if (registeredRaw is String) {
       registeredAt = DateTime.tryParse(registeredRaw);
+    }
+    final lastSyncedRaw = json['lastSyncedAt'];
+    if (lastSyncedRaw is String) {
+      lastSyncedAt = DateTime.tryParse(lastSyncedRaw);
     }
     return CollaborationMetadata(
       ownerUid: ownerUid,
       isOwner: json['isOwner'] == true,
       ownerEmail: json['ownerEmail']?.toString(),
       registeredAt: registeredAt,
+      remoteMapId: json['remoteMapId']?.toString(),
+      lastSyncedAt: lastSyncedAt,
     );
   }
 }
@@ -85,6 +98,43 @@ class CollaborationMetadataStore {
         }
       } catch (_) {
         return null;
+      }
+    }
+    return null;
+  }
+
+  /// Returns the local map associated with a remote map. Older metadata only
+  /// stored the owner UID, so a numeric remote document id is also matched to
+  /// the metadata key during the additive migration period.
+  Future<int?> findLocalMapId({
+    required String ownerUid,
+    required String remoteMapId,
+  }) async {
+    final box = await _ensureBox();
+    for (final entry in box.toMap().entries) {
+      final raw = entry.value;
+      CollaborationMetadata? metadata;
+      try {
+        if (raw is Map) {
+          metadata = CollaborationMetadata.fromJson(raw);
+        } else if (raw is String) {
+          final decoded = jsonDecode(raw);
+          if (decoded is Map<String, dynamic>) {
+            metadata = CollaborationMetadata.fromJson(decoded);
+          }
+        }
+      } catch (_) {
+        continue;
+      }
+      if (metadata == null || metadata.ownerUid != ownerUid) continue;
+
+      final keyMatch = RegExp(r'^map_(\d+)$').firstMatch(entry.key.toString());
+      final localMapId = int.tryParse(keyMatch?.group(1) ?? '');
+      if (localMapId == null) continue;
+      if (metadata.remoteMapId == remoteMapId ||
+          (metadata.remoteMapId == null &&
+              remoteMapId == localMapId.toString())) {
+        return localMapId;
       }
     }
     return null;

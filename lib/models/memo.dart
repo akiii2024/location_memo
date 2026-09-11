@@ -36,6 +36,10 @@ class Memo {
   List<String>? imagePaths; // 画像パス配列を追加
   @HiveField(28)
   int? layer; // レイヤー番号を追加
+  @HiveField(29)
+  String? syncId;
+  @HiveField(30)
+  DateTime? updatedAt;
 
   // キノコ詳細情報フィールド
   @HiveField(14)
@@ -99,7 +103,46 @@ class Memo {
     this.mushroomHabitat,
     this.mushroomGrowthPattern,
     this.layer, // レイヤー番号
+    this.syncId,
+    this.updatedAt,
   });
+
+  Memo copyWith({int? id, int? mapId, String? syncId, DateTime? updatedAt}) {
+    return Memo(
+      id: id ?? this.id,
+      title: title,
+      content: content,
+      latitude: latitude,
+      longitude: longitude,
+      discoveryTime: discoveryTime,
+      discoverer: discoverer,
+      specimenNumber: specimenNumber,
+      category: category,
+      notes: notes,
+      pinNumber: pinNumber,
+      mapId: mapId ?? this.mapId,
+      mapTitle: mapTitle,
+      audioPath: audioPath,
+      imagePaths: imagePaths == null ? null : List<String>.from(imagePaths!),
+      mushroomCapShape: mushroomCapShape,
+      mushroomCapColor: mushroomCapColor,
+      mushroomCapSurface: mushroomCapSurface,
+      mushroomCapSize: mushroomCapSize,
+      mushroomCapUnderStructure: mushroomCapUnderStructure,
+      mushroomGillFeature: mushroomGillFeature,
+      mushroomStemPresence: mushroomStemPresence,
+      mushroomStemShape: mushroomStemShape,
+      mushroomStemColor: mushroomStemColor,
+      mushroomStemSurface: mushroomStemSurface,
+      mushroomRingPresence: mushroomRingPresence,
+      mushroomVolvaPresence: mushroomVolvaPresence,
+      mushroomHabitat: mushroomHabitat,
+      mushroomGrowthPattern: mushroomGrowthPattern,
+      layer: layer,
+      syncId: syncId ?? this.syncId,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
 
   Map<String, dynamic> toMap() {
     return {
@@ -116,8 +159,9 @@ class Memo {
       'pinNumber': pinNumber, // ピン番号を追加
       'mapId': mapId, // 地図ID
       'audioPath': audioPath, // 音声ファイルのパス
-      'imagePaths':
-          imagePaths != null ? jsonEncode(imagePaths) : null, // JSON文字列として保存
+      'imagePaths': imagePaths != null
+          ? jsonEncode(imagePaths)
+          : null, // JSON文字列として保存
       // キノコ詳細情報
       'mushroomCapShape': mushroomCapShape,
       'mushroomCapColor': mushroomCapColor,
@@ -134,6 +178,8 @@ class Memo {
       'mushroomHabitat': mushroomHabitat,
       'mushroomGrowthPattern': mushroomGrowthPattern,
       if (layer != null) 'layer': layer, // レイヤー番号を保存（存在する場合）
+      'syncId': syncId,
+      'updatedAt': updatedAt?.millisecondsSinceEpoch,
     };
   }
 
@@ -174,6 +220,21 @@ class Memo {
       mushroomHabitat: map['mushroomHabitat'],
       mushroomGrowthPattern: map['mushroomGrowthPattern'],
       layer: map['layer'], // レイヤー番号を読み込み
+      syncId: map['syncId']?.toString(),
+      updatedAt: _dateTimeFromValue(map['updatedAt']),
     );
+  }
+
+  static DateTime? _dateTimeFromValue(Object? value) {
+    if (value is int) {
+      return DateTime.fromMillisecondsSinceEpoch(value, isUtc: true);
+    }
+    if (value is num) {
+      return DateTime.fromMillisecondsSinceEpoch(value.toInt(), isUtc: true);
+    }
+    if (value is String) {
+      return DateTime.tryParse(value);
+    }
+    return null;
   }
 }

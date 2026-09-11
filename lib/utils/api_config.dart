@@ -1,5 +1,5 @@
 // API設定ファイル
-// このファイルは.gitignoreに含まれているため、実際のAPIキーを安全に管理できます
+// 実際のAPIキーをソースコードへ直接記載しないでください。
 
 class ApiConfig {
   // Gemini APIキー
@@ -9,10 +9,9 @@ class ApiConfig {
   // 1. 環境変数で設定（推奨）:
   //    flutter run --dart-define=GEMINI_API_KEY=your_actual_api_key_here
   //
-  // 2. 直接編集:
-  //    このファイルのdefaultValueを実際のAPIキーに変更
-  //
-  // 注意: 実際のAPIキーをGitにコミットしないでください
+  // 注意: APIキーはアプリ/Webバンドルから抽出可能です。
+  // 公開版ではキーをクライアントへ埋め込まず、認証・レート制限・App Checkを
+  // 備えたバックエンド経由にしてください。Web版のAI機能は安全のため無効です。
   static const String geminiApiKey = String.fromEnvironment(
     'GEMINI_API_KEY',
     defaultValue: '', // 環境変数で設定してください

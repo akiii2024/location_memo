@@ -1,14 +1,17 @@
 name: location_memo
-description: "A new Flutter project."
+description: "地図上の位置と写真・音声付きメモを整理するフィールドワーク記録アプリ。"
 publish_to: 'none'
 
-version: 0.2.0-alpha+4
+version: 0.2.0+5
 
 environment:
-  sdk: ^3.5.0
+  sdk: ^3.8.0
+  flutter: ">=3.29.0"
 
 dependencies:
   flutter:
+    sdk: flutter
+  flutter_localizations:
     sdk: flutter
 
   cupertino_icons: ^1.0.6
@@ -38,6 +41,9 @@ dependencies:
   cloud_firestore: ^5.6.0
   firebase_auth: ^5.7.0
   firebase_storage: ^12.4.10
+  firebase_app_check: ^0.3.2+10
+  firebase_crashlytics: ^4.3.10
+  uuid: ^4.5.1
 
 dev_dependencies:
   flutter_test:

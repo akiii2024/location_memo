@@ -1,0 +1,129 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function mapData(userId, mapId) {
+      return firestore.get(
+        /databases/(default)/documents/users/$(userId)/maps/$(mapId)
+      ).data;
+    }
+
+    function isShared(userId, mapId) {
+      return signedIn()
+        && firestore.exists(
+          /databases/(default)/documents/users/$(userId)/maps/$(mapId)
+        )
+        && mapData(userId, mapId).sharedWith != null
+        && (
+          (mapData(userId, mapId).sharedWith is list
+            && request.auth.uid in mapData(userId, mapId).sharedWith)
+          || (mapData(userId, mapId).sharedWith is map
+            && mapData(userId, mapId).sharedWith[request.auth.uid] != null
+            && mapData(userId, mapId).sharedWith[request.auth.uid] != false)
+        );
+    }
+
+    function hasMapAccess(userId, mapId) {
+      return isOwner(userId) || isShared(userId, mapId);
+    }
+
+    function validImageAsset() {
+      return request.resource == null
+        || (
+          request.resource.size <= 20 * 1024 * 1024
+          && request.resource.contentType != null
+          && request.resource.contentType.matches('^image/.*$')
+        );
+    }
+
+    function validAudioAsset() {
+      return request.resource == null
+        || (
+          request.resource.size <= 20 * 1024 * 1024
+          && request.resource.contentType != null
+          && request.resource.contentType.matches('^audio/.*$')
+        );
+    }
+
+    function validProfileImage() {
+      return request.resource == null
+        || (
+          request.resource.size <= 5 * 1024 * 1024
+          && request.resource.contentType != null
+          && request.resource.contentType.matches('^image/.*$')
+        );
+    }
+
+    // ベース地図は所有者だけが更新できる。
+    match /users/{userId} {
+      allow list: if isOwner(userId);
+    }
+
+    match /users/{userId}/maps {
+      allow list: if isOwner(userId);
+    }
+
+    match /users/{userId}/maps/{mapId} {
+      allow list: if isOwner(userId);
+    }
+
+    match /users/{userId}/maps/{mapId}/{fileName} {
+      allow read: if hasMapAccess(userId, mapId);
+      allow write: if isOwner(userId) && validImageAsset();
+    }
+
+    // ベース地図の世代管理。新世代の確定後にだけ旧世代を削除する。
+    match /users/{userId}/maps/{mapId}/base_generations/{allPaths=**} {
+      allow read: if hasMapAccess(userId, mapId);
+      allow write: if isOwner(userId) && validImageAsset();
+    }
+
+    // 現行の世代管理パス。画像と音声のMIMEを保存先ごとに固定する。
+    match /users/{userId}/maps/{mapId}/memos/{memoId}/generations/{generation}/images/{fileName} {
+      allow read: if hasMapAccess(userId, mapId);
+      allow write: if hasMapAccess(userId, mapId) && validImageAsset();
+    }
+
+    match /users/{userId}/maps/{mapId}/memos/{memoId}/generations/{generation}/audio/{fileName} {
+      allow read: if hasMapAccess(userId, mapId);
+      allow write: if hasMapAccess(userId, mapId) && validAudioAsset();
+    }
+
+    // 旧クライアントの添付パスは互換読み書きを維持する。
+    match /users/{userId}/maps/{mapId}/memos/{memoId}/images/{fileName} {
+      allow read: if hasMapAccess(userId, mapId);
+      allow write: if hasMapAccess(userId, mapId) && validImageAsset();
+    }
+
+    match /users/{userId}/maps/{mapId}/memos/{memoId}/audio/{fileName} {
+      allow read: if hasMapAccess(userId, mapId);
+      allow write: if hasMapAccess(userId, mapId) && validAudioAsset();
+    }
+
+    // 未知のメモ配下パスは既存データの読み取り・削除だけを許可する。
+    match /users/{userId}/maps/{mapId}/memos/{allPaths=**} {
+      allow read: if hasMapAccess(userId, mapId);
+      allow delete: if hasMapAccess(userId, mapId);
+    }
+
+    match /userProfiles/{userId}/{fileName} {
+      allow read, write: if isOwner(userId) && validProfileImage();
+    }
+
+    match /userProfiles/{userId} {
+      allow list: if isOwner(userId);
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import '../utils/app_logger.dart';
 import 'package:flutter/material.dart';
 import '../models/memo.dart';
 import '../models/map_info.dart';
@@ -10,10 +11,10 @@ import 'dart:io';
 class MemoDetailScreen extends StatefulWidget {
   final Memo memo;
 
-  const MemoDetailScreen({Key? key, required this.memo}) : super(key: key);
+  const MemoDetailScreen({super.key, required this.memo});
 
   @override
-  _MemoDetailScreenState createState() => _MemoDetailScreenState();
+  State<MemoDetailScreen> createState() => _MemoDetailScreenState();
 }
 
 class _MemoDetailScreenState extends State<MemoDetailScreen> {
@@ -46,10 +47,12 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
     super.initState();
     _titleController = TextEditingController(text: widget.memo.title);
     _contentController = TextEditingController(text: widget.memo.content);
-    _discovererController =
-        TextEditingController(text: widget.memo.discoverer ?? '');
-    _specimenNumberController =
-        TextEditingController(text: widget.memo.specimenNumber ?? '');
+    _discovererController = TextEditingController(
+      text: widget.memo.discoverer ?? '',
+    );
+    _specimenNumberController = TextEditingController(
+      text: widget.memo.specimenNumber ?? '',
+    );
     _notesController = TextEditingController(text: widget.memo.notes ?? '');
     _discoveryTime = widget.memo.discoveryTime;
     // カテゴリがnullの場合や、リストに含まれていない場合はデフォルト値を設定
@@ -72,12 +75,14 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
       firstDate: DateTime(2000),
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
+    if (!mounted) return;
 
     if (date != null) {
       final time = await showTimePicker(
         context: context,
         initialTime: TimeOfDay.fromDateTime(_discoveryTime ?? DateTime.now()),
       );
+      if (!mounted) return;
 
       if (time != null) {
         setState(() {
@@ -106,6 +111,7 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
     try {
       // 利用可能な地図を取得
       final maps = await DatabaseHelper.instance.readAllMaps();
+      if (!mounted) return;
       MapInfo? selectedMap;
 
       // 現在のメモの地図IDまたはデフォルトの地図を選択
@@ -128,6 +134,7 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
           ),
         ),
       );
+      if (!mounted) return;
 
       if (result != null) {
         setState(() {
@@ -145,14 +152,13 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
           ),
         );
       }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('位置選択中にエラーが発生しました: $e')),
-      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('位置を更新できませんでした。再試行してください。')));
     } finally {
-      setState(() {
-        _isLocationLoading = false;
-      });
+      if (mounted) setState(() => _isLocationLoading = false);
     }
   }
 
@@ -164,7 +170,7 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
 
     showDialog(
       context: context,
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogContext) {
         return AlertDialog(
           title: const Text('ピン番号を編集'),
           content: Column(
@@ -185,7 +191,7 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () => Navigator.of(dialogContext).pop(),
               child: const Text('キャンセル'),
             ),
             TextButton(
@@ -193,46 +199,39 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                 final newNumber = int.tryParse(controller.text);
                 if (newNumber != null && newNumber > 0) {
                   // メモを更新
-                  final updatedMemo = Memo(
-                    id: widget.memo.id,
-                    title: widget.memo.title,
-                    content: widget.memo.content,
-                    latitude: widget.memo.latitude,
-                    longitude: widget.memo.longitude,
-                    discoveryTime: widget.memo.discoveryTime,
-                    discoverer: widget.memo.discoverer,
-                    specimenNumber: widget.memo.specimenNumber,
-                    category: widget.memo.category,
-                    notes: widget.memo.notes,
-                    pinNumber: newNumber,
-                  );
+                  widget.memo.pinNumber = newNumber;
+                  final updatedMemo = widget.memo;
 
                   await DatabaseHelper.instance.update(updatedMemo);
+                  if (!dialogContext.mounted || !mounted) return;
                   try {
                     await CollaborationSyncCoordinator.instance
                         .onLocalMemoUpdated(updatedMemo);
                   } catch (error, stackTrace) {
-                    debugPrint('Failed to sync memo update: $error');
-                    debugPrintStack(stackTrace: stackTrace);
+                    appLog('Failed to sync memo update: $error');
+                    appLog('Stack trace', stackTrace);
+                    if (!dialogContext.mounted || !mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('共同編集への同期に失敗しました: $error'),
+                      const SnackBar(
+                        content: Text('端末には保存しました。クラウド同期は後で再試行します。'),
                         backgroundColor: Colors.orange,
                       ),
                     );
                   }
+                  if (!dialogContext.mounted || !mounted) return;
 
                   // 画面を更新
                   setState(() {
                     widget.memo.pinNumber = newNumber;
                   });
 
-                  Navigator.of(context).pop();
+                  Navigator.of(dialogContext).pop();
+                  if (!mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text('ピン番号を $newNumber に更新しました')),
                   );
                 } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(
                     const SnackBar(content: Text('有効な番号を入力してください')),
                   );
                 }
@@ -258,9 +257,13 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('タイトル',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold, color: Colors.grey)),
+                  const Text(
+                    'タイトル',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey,
+                    ),
+                  ),
                   const SizedBox(height: 4),
                   Text(widget.memo.title, style: const TextStyle(fontSize: 18)),
                 ],
@@ -276,18 +279,24 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('基本情報',
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const Text(
+                    '基本情報',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 12),
                   if (widget.memo.category != null) ...[
                     Row(
                       children: [
-                        const Icon(Icons.category,
-                            size: 16, color: Colors.grey),
+                        const Icon(
+                          Icons.category,
+                          size: 16,
+                          color: Colors.grey,
+                        ),
                         const SizedBox(width: 8),
-                        const Text('カテゴリ: ',
-                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        const Text(
+                          'カテゴリ: ',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                         Text(widget.memo.category!),
                       ],
                     ),
@@ -296,11 +305,16 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                   if (widget.memo.discoveryTime != null) ...[
                     Row(
                       children: [
-                        const Icon(Icons.schedule,
-                            size: 16, color: Colors.grey),
+                        const Icon(
+                          Icons.schedule,
+                          size: 16,
+                          color: Colors.grey,
+                        ),
                         const SizedBox(width: 8),
-                        const Text('発見日時: ',
-                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        const Text(
+                          '発見日時: ',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                         Text(_formatDateTime(widget.memo.discoveryTime)),
                       ],
                     ),
@@ -311,8 +325,10 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                       children: [
                         const Icon(Icons.person, size: 16, color: Colors.grey),
                         const SizedBox(width: 8),
-                        const Text('発見者: ',
-                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        const Text(
+                          '発見者: ',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                         Text(widget.memo.discoverer!),
                       ],
                     ),
@@ -323,8 +339,10 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                       children: [
                         const Icon(Icons.numbers, size: 16, color: Colors.grey),
                         const SizedBox(width: 8),
-                        const Text('標本番号: ',
-                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        const Text(
+                          '標本番号: ',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                         Text(widget.memo.specimenNumber!),
                       ],
                     ),
@@ -333,17 +351,25 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                   if (widget.memo.pinNumber != null) ...[
                     Row(
                       children: [
-                        const Icon(Icons.push_pin,
-                            size: 16, color: Colors.grey),
+                        const Icon(
+                          Icons.push_pin,
+                          size: 16,
+                          color: Colors.grey,
+                        ),
                         const SizedBox(width: 8),
-                        const Text('ピン番号: ',
-                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        const Text(
+                          'ピン番号: ',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                         Text('${widget.memo.pinNumber}'),
                         const SizedBox(width: 8),
                         GestureDetector(
                           onTap: _showPinNumberDialog,
-                          child: const Icon(Icons.edit,
-                              size: 16, color: Colors.blue),
+                          child: const Icon(
+                            Icons.edit,
+                            size: 16,
+                            color: Colors.blue,
+                          ),
                         ),
                       ],
                     ),
@@ -354,10 +380,14 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                       children: [
                         const Icon(Icons.map, size: 16, color: Colors.grey),
                         const SizedBox(width: 8),
-                        const Text('地図: ',
-                            style: TextStyle(fontWeight: FontWeight.bold)),
-                        Text(widget.memo.mapTitle!,
-                            style: const TextStyle(color: Colors.blue)),
+                        const Text(
+                          '地図: ',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          widget.memo.mapTitle!,
+                          style: const TextStyle(color: Colors.blue),
+                        ),
                       ],
                     ),
                   ],
@@ -375,9 +405,13 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('内容・説明',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, color: Colors.grey)),
+                    const Text(
+                      '内容・説明',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     Text(widget.memo.content),
                   ],
@@ -395,9 +429,13 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('備考',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, color: Colors.grey)),
+                    const Text(
+                      '備考',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     Text(widget.memo.notes!),
                   ],
@@ -418,18 +456,23 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.photo_library,
-                            size: 16, color: Colors.grey),
+                        const Icon(
+                          Icons.photo_library,
+                          size: 16,
+                          color: Colors.grey,
+                        ),
                         const SizedBox(width: 8),
                         Text(
                           '添付画像 (${widget.memo.imagePaths!.length}枚)',
                           style: const TextStyle(
-                              fontWeight: FontWeight.bold, color: Colors.grey),
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey,
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 12),
-                    Container(
+                    SizedBox(
                       height: 120,
                       child: ListView.builder(
                         scrollDirection: Axis.horizontal,
@@ -446,8 +489,9 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                                   width: 120,
                                   height: 120,
                                   decoration: BoxDecoration(
-                                    border:
-                                        Border.all(color: Colors.grey.shade300),
+                                    border: Border.all(
+                                      color: Colors.grey.shade300,
+                                    ),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: ClipRRect(
@@ -465,16 +509,17 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                                                 AppBar(
                                                   backgroundColor: Colors.black,
                                                   foregroundColor: Colors.white,
-                                                  title:
-                                                      Text('画像 ${index + 1}'),
+                                                  title: Text(
+                                                    '画像 ${index + 1}',
+                                                  ),
                                                 ),
                                                 Expanded(
                                                   child: Center(
-                                                    child: ImageHelper
-                                                        .buildImageWidget(
-                                                      imagePath,
-                                                      fit: BoxFit.contain,
-                                                    ),
+                                                    child:
+                                                        ImageHelper.buildImageWidget(
+                                                          imagePath,
+                                                          fit: BoxFit.contain,
+                                                        ),
                                                   ),
                                                 ),
                                               ],
@@ -495,7 +540,9 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                                   left: 4,
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(
-                                        horizontal: 6, vertical: 2),
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: Colors.black54,
                                       borderRadius: BorderRadius.circular(10),
@@ -532,17 +579,25 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('位置情報',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, color: Colors.grey)),
+                    const Text(
+                      '位置情報',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        const Icon(Icons.location_on,
-                            size: 16, color: Colors.grey),
+                        const Icon(
+                          Icons.location_on,
+                          size: 16,
+                          color: Colors.grey,
+                        ),
                         const SizedBox(width: 8),
                         Text(
-                            '緯度: ${widget.memo.latitude!.toStringAsFixed(6)}\n経度: ${widget.memo.longitude!.toStringAsFixed(6)}'),
+                          '緯度: ${widget.memo.latitude!.toStringAsFixed(6)}\n経度: ${widget.memo.longitude!.toStringAsFixed(6)}',
+                        ),
                       ],
                     ),
                   ],
@@ -563,8 +618,10 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // 基本情報
-          const Text('基本情報',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const Text(
+            '基本情報',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 12),
 
           TextField(
@@ -578,26 +635,23 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
 
           // カテゴリ選択
           DropdownButtonFormField<String>(
-            value: _selectedCategory ?? _categories[0],
+            initialValue: _selectedCategory ?? _categories[0],
             decoration: const InputDecoration(
               labelText: 'カテゴリ',
               border: OutlineInputBorder(),
             ),
             items: () {
               // デバッグ用：valueとitemsの値をコンソールに出力
-              print('=== DropdownButton Debug Info ===');
-              print('Selected value: ${_selectedCategory ?? _categories[0]}');
-              print('Available categories:');
+              appLog('=== DropdownButton Debug Info ===');
+              appLog('Selected value: ${_selectedCategory ?? _categories[0]}');
+              appLog('Available categories:');
               for (int i = 0; i < _categories.length; i++) {
-                print('  [$i]: ${_categories[i]}');
+                appLog('  [$i]: ${_categories[i]}');
               }
-              print('===============================');
+              appLog('===============================');
 
               return _categories.map((category) {
-                return DropdownMenuItem(
-                  value: category,
-                  child: Text(category),
-                );
+                return DropdownMenuItem(value: category, child: Text(category));
               }).toList();
             }(),
             onChanged: (value) {
@@ -645,8 +699,10 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
           const SizedBox(height: 24),
 
           // 詳細情報
-          const Text('詳細情報',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const Text(
+            '詳細情報',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 12),
 
           TextField(
@@ -676,8 +732,10 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
           // 添付画像（読み取り専用）
           if (widget.memo.imagePaths != null &&
               widget.memo.imagePaths!.isNotEmpty) ...[
-            const Text('添付画像',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              '添付画像',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 12),
             Card(
               color: Colors.grey.shade50,
@@ -705,7 +763,7 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                       style: TextStyle(fontSize: 12, color: Colors.orange),
                     ),
                     const SizedBox(height: 12),
-                    Container(
+                    SizedBox(
                       height: 100,
                       child: ListView.builder(
                         scrollDirection: Axis.horizontal,
@@ -721,8 +779,9 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                                   width: 100,
                                   height: 100,
                                   decoration: BoxDecoration(
-                                    border:
-                                        Border.all(color: Colors.grey.shade300),
+                                    border: Border.all(
+                                      color: Colors.grey.shade300,
+                                    ),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: ClipRRect(
@@ -738,7 +797,9 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                                   left: 4,
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(
-                                        horizontal: 4, vertical: 2),
+                                      horizontal: 4,
+                                      vertical: 2,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: Colors.black54,
                                       borderRadius: BorderRadius.circular(8),
@@ -767,8 +828,10 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
           ],
 
           // 位置情報
-          const Text('位置情報',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const Text(
+            '位置情報',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 12),
           Card(
             child: Padding(
@@ -789,8 +852,9 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Icon(Icons.map),
                         label: const Text('位置編集'),
@@ -853,12 +917,34 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                   mapId: widget.memo.mapId, // 地図IDを保持
                   audioPath: widget.memo.audioPath, // 音声パスを保持
                   imagePaths: widget.memo.imagePaths, // 画像パスを保持
+                  mushroomCapShape: widget.memo.mushroomCapShape,
+                  mushroomCapColor: widget.memo.mushroomCapColor,
+                  mushroomCapSurface: widget.memo.mushroomCapSurface,
+                  mushroomCapSize: widget.memo.mushroomCapSize,
+                  mushroomCapUnderStructure:
+                      widget.memo.mushroomCapUnderStructure,
+                  mushroomGillFeature: widget.memo.mushroomGillFeature,
+                  mushroomStemPresence: widget.memo.mushroomStemPresence,
+                  mushroomStemShape: widget.memo.mushroomStemShape,
+                  mushroomStemColor: widget.memo.mushroomStemColor,
+                  mushroomStemSurface: widget.memo.mushroomStemSurface,
+                  mushroomRingPresence: widget.memo.mushroomRingPresence,
+                  mushroomVolvaPresence: widget.memo.mushroomVolvaPresence,
+                  mushroomHabitat: widget.memo.mushroomHabitat,
+                  mushroomGrowthPattern: widget.memo.mushroomGrowthPattern,
+                  layer: widget.memo.layer,
+                  syncId: widget.memo.syncId,
+                  updatedAt: widget.memo.updatedAt,
                 );
 
                 await DatabaseHelper.instance.update(updatedMemo);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('記録を更新しました')),
+                await CollaborationSyncCoordinator.instance.onLocalMemoUpdated(
+                  updatedMemo,
                 );
+                if (!mounted) return;
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('記録を更新しました')));
                 Navigator.pop(context, true);
               },
               style: ElevatedButton.styleFrom(
@@ -937,47 +1023,50 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                     ],
                   ),
                 );
+                if (!context.mounted) return;
 
                 if (shouldDelete == true) {
                   try {
-                    // 画像ファイルを削除
-                    if (widget.memo.imagePaths != null &&
-                        widget.memo.imagePaths!.isNotEmpty) {
-                      for (final imagePath in widget.memo.imagePaths!) {
-                        final imageFile = File(imagePath);
-                        if (await imageFile.exists()) {
-                          await imageFile.delete();
-                        }
-                      }
-                    }
-
-                    // 音声ファイルを削除
-                    if (widget.memo.audioPath != null &&
-                        widget.memo.audioPath!.isNotEmpty) {
-                      final audioFile = File(widget.memo.audioPath!);
-                      if (await audioFile.exists()) {
-                        await audioFile.delete();
-                      }
-                    }
-
-                    // データベースから削除
+                    // 先に端末内の変更と同期キューを確定し、添付はその後に回収する。
                     await DatabaseHelper.instance.delete(widget.memo.id!);
                     try {
                       await CollaborationSyncCoordinator.instance
                           .onLocalMemoDeleted(widget.memo);
                     } catch (error, stackTrace) {
-                      debugPrint('Failed to sync memo deletion: $error');
-                      debugPrintStack(stackTrace: stackTrace);
+                      appLog('Failed to sync memo deletion: $error');
+                      appLog('Stack trace', stackTrace);
+                      if (!context.mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('共同編集からの削除同期に失敗しました: $error'),
+                        const SnackBar(
+                          content: Text('端末では削除しました。クラウド同期は後で再試行します。'),
                           backgroundColor: Colors.orange,
                         ),
                       );
                     }
 
+                    if (widget.memo.imagePaths != null) {
+                      for (final imagePath in widget.memo.imagePaths!) {
+                        try {
+                          final imageFile = File(imagePath);
+                          if (await imageFile.exists()) {
+                            await imageFile.delete();
+                          }
+                        } catch (_) {
+                          // 添付の回収失敗は、確定済みの削除を巻き戻さない。
+                        }
+                      }
+                    }
+                    if (widget.memo.audioPath case final audioPath?) {
+                      try {
+                        final audioFile = File(audioPath);
+                        if (await audioFile.exists()) await audioFile.delete();
+                      } catch (_) {
+                        // Best effort cleanup.
+                      }
+                    }
+
                     // 成功メッセージを表示
-                    if (mounted) {
+                    if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                           content: Text('記録を削除しました'),
@@ -987,13 +1076,13 @@ class _MemoDetailScreenState extends State<MemoDetailScreen> {
                     }
 
                     // 画面を閉じて、削除が成功したことを通知
-                    Navigator.pop(context, true);
-                  } catch (e) {
+                    if (context.mounted) Navigator.pop(context, true);
+                  } catch (_) {
                     // エラーメッセージを表示
-                    if (mounted) {
+                    if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('削除に失敗しました: $e'),
+                        const SnackBar(
+                          content: Text('記録を削除できませんでした。再試行してください。'),
                           backgroundColor: Colors.red,
                         ),
                       );

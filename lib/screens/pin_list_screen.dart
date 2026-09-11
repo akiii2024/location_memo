@@ -4,12 +4,13 @@ import '../utils/database_helper.dart';
 import 'memo_detail_screen.dart';
 import 'map_screen.dart';
 import '../models/map_info.dart';
+import '../widgets/app_state_view.dart';
 
 class PinListScreen extends StatefulWidget {
-  const PinListScreen({Key? key}) : super(key: key);
+  const PinListScreen({super.key});
 
   @override
-  _PinListScreenState createState() => _PinListScreenState();
+  State<PinListScreen> createState() => _PinListScreenState();
 }
 
 class _PinListScreenState extends State<PinListScreen> {
@@ -18,6 +19,8 @@ class _PinListScreenState extends State<PinListScreen> {
   String? _selectedCategory;
   String? _selectedMap;
   List<MapInfo> _maps = [];
+  bool _isLoading = true;
+  String? _loadError;
 
   final List<String> _categories = [
     'すべて',
@@ -39,13 +42,23 @@ class _PinListScreenState extends State<PinListScreen> {
   }
 
   Future<void> _loadData() async {
-    final memos = await DatabaseHelper.instance.readAllMemosWithMapTitle();
-    final maps = await DatabaseHelper.instance.readAllMaps();
-    setState(() {
-      _memos = memos;
-      _maps = maps;
+    if (mounted) setState(() => _isLoading = true);
+    try {
+      final results = await Future.wait([
+        DatabaseHelper.instance.readAllMemosWithMapTitle(),
+        DatabaseHelper.instance.readAllMaps(),
+      ]).timeout(const Duration(seconds: 10));
+      if (!mounted) return;
+      _memos = results[0] as List<Memo>;
+      _maps = results[1] as List<MapInfo>;
+      _loadError = null;
       _applyFilter();
-    });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadError = 'ピンを読み込めませんでした。');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   void _applyFilter() {
@@ -53,14 +66,16 @@ class _PinListScreenState extends State<PinListScreen> {
 
     // カテゴリフィルタ
     if (_selectedCategory != null && _selectedCategory != 'すべて') {
-      filtered =
-          filtered.where((memo) => memo.category == _selectedCategory).toList();
+      filtered = filtered
+          .where((memo) => memo.category == _selectedCategory)
+          .toList();
     }
 
     // 地図フィルタ
     if (_selectedMap != null && _selectedMap != 'すべて') {
-      filtered =
-          filtered.where((memo) => memo.mapTitle == _selectedMap).toList();
+      filtered = filtered
+          .where((memo) => memo.mapTitle == _selectedMap)
+          .toList();
     }
 
     // ピン番号順にソート
@@ -119,13 +134,14 @@ class _PinListScreenState extends State<PinListScreen> {
       final mapInfo = _maps.firstWhere(
         (map) => map.id == memo.mapId,
         orElse: () => MapInfo(
-            id: memo.mapId, title: memo.mapTitle ?? 'ピンの地図', imagePath: null),
+          id: memo.mapId,
+          title: memo.mapTitle ?? 'ピンの地図',
+          imagePath: null,
+        ),
       );
       await Navigator.push(
         context,
-        MaterialPageRoute(
-          builder: (context) => MapScreen(mapInfo: mapInfo),
-        ),
+        MaterialPageRoute(builder: (context) => MapScreen(mapInfo: mapInfo)),
       );
       _loadData();
     }
@@ -136,231 +152,257 @@ class _PinListScreenState extends State<PinListScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('ピン一覧'),
-        actions: [
-          Icon(Icons.push_pin, color: Colors.grey[600]),
-        ],
+        actions: [Icon(Icons.push_pin, color: Colors.grey[600])],
       ),
-      body: Column(
-        children: [
-          // フィルタ部分
-          Container(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              children: [
-                // カテゴリフィルタ
-                Row(
+      body: _isLoading
+          ? const AppStateView(
+              icon: Icons.push_pin_outlined,
+              title: 'ピンを読み込んでいます…',
+              loading: true,
+            )
+          : _loadError != null
+          ? AppStateView(
+              icon: Icons.error_outline,
+              title: _loadError!,
+              message: '時間をおいてもう一度お試しください。',
+              onRetry: _loadData,
+            )
+          : Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 920),
+                child: Column(
                   children: [
-                    const Icon(Icons.category, size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: DropdownButton<String>(
-                        value: _selectedCategory,
-                        hint: const Text('カテゴリで絞り込み'),
-                        isExpanded: true,
-                        items: _categories.map((category) {
-                          return DropdownMenuItem(
-                            value: category,
-                            child: Text(category),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedCategory = value;
-                            _applyFilter();
-                          });
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                // 地図フィルタ
-                Row(
-                  children: [
-                    const Icon(Icons.map, size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: DropdownButton<String>(
-                        value: _selectedMap,
-                        hint: const Text('地図で絞り込み'),
-                        isExpanded: true,
-                        items: [
-                          const DropdownMenuItem(
-                            value: 'すべて',
-                            child: Text('すべて'),
-                          ),
-                          ..._maps.map((map) {
-                            return DropdownMenuItem(
-                              value: map.title,
-                              child: Text(map.title),
-                            );
-                          }).toList(),
-                        ],
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedMap = value;
-                            _applyFilter();
-                          });
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          // 統計情報
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-            color: Colors.grey[100],
-            child: Row(
-              children: [
-                Icon(Icons.info_outline, size: 16, color: Colors.grey[600]),
-                const SizedBox(width: 8),
-                Text(
-                  '${_filteredMemos.length}個のピンが見つかりました',
-                  style: TextStyle(color: Colors.grey[600]),
-                ),
-              ],
-            ),
-          ),
-          // ピンリスト
-          Expanded(
-            child: _filteredMemos.isEmpty
-                ? const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.push_pin, size: 64, color: Colors.grey),
-                        SizedBox(height: 16),
-                        Text(
-                          'ピンが見つかりません',
-                          style: TextStyle(fontSize: 18, color: Colors.grey),
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                          '地図上にピンを追加してください',
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(8.0),
-                    itemCount: _filteredMemos.length,
-                    itemBuilder: (context, index) {
-                      final memo = _filteredMemos[index];
-                      return Card(
-                        margin: const EdgeInsets.symmetric(vertical: 4.0),
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: _getCategoryColor(memo.category),
-                            child: Text(
-                              memo.pinNumber?.toString() ?? '?',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                          title: Text(
-                            memo.title,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                    // フィルタ部分
+                    Container(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        children: [
+                          // カテゴリフィルタ
+                          Row(
                             children: [
-                              if (memo.category != null)
-                                Row(
-                                  children: [
-                                    Icon(
-                                      _getCategoryIcon(memo.category),
-                                      size: 16,
-                                      color: _getCategoryColor(memo.category),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(memo.category!),
-                                  ],
-                                ),
-                              if (memo.mapTitle != null)
-                                Row(
-                                  children: [
-                                    const Icon(Icons.map,
-                                        size: 16, color: Colors.grey),
-                                    const SizedBox(width: 4),
-                                    Text(memo.mapTitle!),
-                                  ],
-                                ),
-                              if (memo.discoveryTime != null)
-                                Row(
-                                  children: [
-                                    const Icon(Icons.access_time,
-                                        size: 16, color: Colors.grey),
-                                    const SizedBox(width: 4),
-                                    Text(_formatDateTime(memo.discoveryTime)),
-                                  ],
-                                ),
-                            ],
-                          ),
-                          trailing: PopupMenuButton<String>(
-                            onSelected: (value) {
-                              switch (value) {
-                                case 'detail':
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          MemoDetailScreen(memo: memo),
-                                    ),
-                                  ).then((_) => _loadData());
-                                  break;
-                                case 'map':
-                                  _openMapWithPin(memo);
-                                  break;
-                              }
-                            },
-                            itemBuilder: (context) => [
-                              const PopupMenuItem(
-                                value: 'detail',
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.info),
-                                    SizedBox(width: 8),
-                                    Text('詳細を見る'),
-                                  ],
-                                ),
-                              ),
-                              const PopupMenuItem(
-                                value: 'map',
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.map),
-                                    SizedBox(width: 8),
-                                    Text('地図で表示'),
-                                  ],
+                              const Icon(Icons.category, size: 20),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: DropdownButton<String>(
+                                  value: _selectedCategory,
+                                  hint: const Text('カテゴリで絞り込み'),
+                                  isExpanded: true,
+                                  items: _categories.map((category) {
+                                    return DropdownMenuItem(
+                                      value: category,
+                                      child: Text(category),
+                                    );
+                                  }).toList(),
+                                  onChanged: (value) {
+                                    _selectedCategory = value;
+                                    _applyFilter();
+                                  },
                                 ),
                               ),
                             ],
                           ),
-                          onTap: () async {
-                            await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    MemoDetailScreen(memo: memo),
+                          const SizedBox(height: 8),
+                          // 地図フィルタ
+                          Row(
+                            children: [
+                              const Icon(Icons.map, size: 20),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: DropdownButton<String>(
+                                  value: _selectedMap,
+                                  hint: const Text('地図で絞り込み'),
+                                  isExpanded: true,
+                                  items: [
+                                    const DropdownMenuItem(
+                                      value: 'すべて',
+                                      child: Text('すべて'),
+                                    ),
+                                    ..._maps.map((map) {
+                                      return DropdownMenuItem(
+                                        value: map.title,
+                                        child: Text(map.title),
+                                      );
+                                    }),
+                                  ],
+                                  onChanged: (value) {
+                                    _selectedMap = value;
+                                    _applyFilter();
+                                  },
+                                ),
                               ),
-                            );
-                            _loadData();
-                          },
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    // 統計情報
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16.0,
+                        vertical: 8.0,
+                      ),
+                      color: Colors.grey[100],
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.info_outline,
+                            size: 16,
+                            color: Colors.grey[600],
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${_filteredMemos.length}個のピンが見つかりました',
+                            style: TextStyle(color: Colors.grey[600]),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // ピンリスト
+                    Expanded(
+                      child: _filteredMemos.isEmpty
+                          ? const AppStateView(
+                              icon: Icons.push_pin_outlined,
+                              title: 'ピンが見つかりません',
+                              message: '地図を開き、「記録を追加」から最初のピンを作成できます。',
+                            )
+                          : ListView.builder(
+                              padding: const EdgeInsets.all(8.0),
+                              itemCount: _filteredMemos.length,
+                              itemBuilder: (context, index) {
+                                final memo = _filteredMemos[index];
+                                return Card(
+                                  margin: const EdgeInsets.symmetric(
+                                    vertical: 4.0,
+                                  ),
+                                  child: ListTile(
+                                    leading: CircleAvatar(
+                                      backgroundColor: _getCategoryColor(
+                                        memo.category,
+                                      ),
+                                      child: Text(
+                                        memo.pinNumber?.toString() ?? '?',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                    title: Text(
+                                      memo.title,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    subtitle: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        if (memo.category != null)
+                                          Row(
+                                            children: [
+                                              Icon(
+                                                _getCategoryIcon(memo.category),
+                                                size: 16,
+                                                color: _getCategoryColor(
+                                                  memo.category,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(memo.category!),
+                                            ],
+                                          ),
+                                        if (memo.mapTitle != null)
+                                          Row(
+                                            children: [
+                                              const Icon(
+                                                Icons.map,
+                                                size: 16,
+                                                color: Colors.grey,
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(memo.mapTitle!),
+                                            ],
+                                          ),
+                                        if (memo.discoveryTime != null)
+                                          Row(
+                                            children: [
+                                              const Icon(
+                                                Icons.access_time,
+                                                size: 16,
+                                                color: Colors.grey,
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                _formatDateTime(
+                                                  memo.discoveryTime,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                      ],
+                                    ),
+                                    trailing: PopupMenuButton<String>(
+                                      onSelected: (value) {
+                                        switch (value) {
+                                          case 'detail':
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (context) =>
+                                                    MemoDetailScreen(
+                                                      memo: memo,
+                                                    ),
+                                              ),
+                                            ).then((_) => _loadData());
+                                            break;
+                                          case 'map':
+                                            _openMapWithPin(memo);
+                                            break;
+                                        }
+                                      },
+                                      itemBuilder: (context) => [
+                                        const PopupMenuItem(
+                                          value: 'detail',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.info),
+                                              SizedBox(width: 8),
+                                              Text('詳細を見る'),
+                                            ],
+                                          ),
+                                        ),
+                                        const PopupMenuItem(
+                                          value: 'map',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.map),
+                                              SizedBox(width: 8),
+                                              Text('地図で表示'),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    onTap: () async {
+                                      await Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              MemoDetailScreen(memo: memo),
+                                        ),
+                                      );
+                                      _loadData();
+                                    },
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
     );
   }
 

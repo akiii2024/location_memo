@@ -20,19 +20,25 @@ class MapInfoAdapter extends TypeAdapter<MapInfo> {
       id: fields[0] as int?,
       title: fields[1] as String,
       imagePath: fields[2] as String?,
+      syncId: fields[3] as String?,
+      updatedAt: fields[4] as DateTime?,
     );
   }
 
   @override
   void write(BinaryWriter writer, MapInfo obj) {
     writer
-      ..writeByte(3)
+      ..writeByte(5)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
       ..write(obj.title)
       ..writeByte(2)
-      ..write(obj.imagePath);
+      ..write(obj.imagePath)
+      ..writeByte(3)
+      ..write(obj.syncId)
+      ..writeByte(4)
+      ..write(obj.updatedAt);
   }
 
   @override

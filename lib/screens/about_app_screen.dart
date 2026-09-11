@@ -1,83 +1,76 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
+import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../utils/app_info.dart';
 
 class AboutAppScreen extends StatelessWidget {
-  const AboutAppScreen({Key? key}) : super(key: key);
+  const AboutAppScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('アプリについて'),
-      ),
-      body: Padding(
+      appBar: AppBar(title: const Text('アプリについて')),
+      body: ListView(
         padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // アプリアイコンと基本情報
-            Center(
-              child: Column(
-                children: [
-                  Container(
-                    width: 120,
-                    height: 120,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.15),
-                          spreadRadius: 2,
-                          blurRadius: 8,
-                          offset: const Offset(0, 3),
-                        ),
-                      ],
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(20),
-                      child: Image.asset(
-                        'assets/icons/app_icon.png',
-                        width: 120,
-                        height: 120,
-                        fit: BoxFit.cover,
+        children: [
+          // アプリアイコンと基本情報
+          Center(
+            child: Column(
+              children: [
+                Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.15),
+                        spreadRadius: 2,
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
                       ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: Image.asset(
+                      'assets/icons/app_icon.png',
+                      width: 120,
+                      height: 120,
+                      fit: BoxFit.cover,
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  Text(
-                    AppInfo.appName,
-                    style: const TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      fontFamily: 'NotoSansJP',
-                    ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  AppInfo.appName,
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'NotoSansJP',
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'バージョン ${AppInfo.version}',
-                    style: TextStyle(
-                      fontSize: 18,
-                      color: Colors.grey.shade600,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'バージョン ${AppInfo.version}',
+                  style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
+                ),
+              ],
             ),
-            const SizedBox(height: 48),
+          ),
+          const SizedBox(height: 48),
 
-            // 開発者情報
-            const Text(
-              'Developed by',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'NotoSansJP',
-              ),
+          // 開発者情報
+          const Text(
+            'Developed by',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              fontFamily: 'NotoSansJP',
             ),
-            const SizedBox(height: 16),
-            /*
+          ),
+          const SizedBox(height: 16),
+          /*
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -88,7 +81,7 @@ class AboutAppScreen extends StatelessWidget {
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.15),
+                        color: Colors.black.withValues(alpha: 0.15),
                         spreadRadius: 1,
                         blurRadius: 4,
                         offset: const Offset(0, 2),
@@ -126,11 +119,11 @@ class AboutAppScreen extends StatelessWidget {
                         // フォールバック: デフォルトブラウザで開く
                         await launchUrl(url, mode: LaunchMode.platformDefault);
                       }
-                    } catch (e) {
+                    } catch (_) {
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('GitHubページを開けませんでした: $e'),
+                          const SnackBar(
+                            content: Text('GitHubページを開けませんでした。'),
                             backgroundColor: Colors.red,
                           ),
                         );
@@ -176,11 +169,11 @@ class AboutAppScreen extends StatelessWidget {
                           );
                         }
                       }
-                    } catch (e) {
+                    } catch (_) {
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('エラーが発生しました: $e'),
+                          const SnackBar(
+                            content: Text('メールアプリを起動できませんでした。'),
                             backgroundColor: Colors.red,
                           ),
                         );
@@ -207,44 +200,41 @@ class AboutAppScreen extends StatelessWidget {
               ],
             ),
             */
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.15),
-                        spreadRadius: 1,
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: Icon(
-                      Icons.account_circle,
-                      size: 40,
-                      color: Colors.grey,
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.15),
+                      spreadRadius: 1,
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
                     ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: const Icon(
+                    Icons.account_circle,
+                    size: 40,
+                    color: Colors.grey,
                   ),
                 ),
-                const SizedBox(width: 12),
-                const Text(
-                  'Haruto Tomikawa',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                // メールリンク
-                /*
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'Haruto Tomikawa',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(width: 16),
+              // メールリンク
+              /*
                 rGestureDetector(
                   onTap: () async {
                     final Uri emailUri = Uri(
@@ -265,11 +255,11 @@ class AboutAppScreen extends StatelessWidget {
                           );
                         }
                       }
-                    } catch (e) {
+                    } catch (_) {
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('エラーが発生しました: $e'),
+                          const SnackBar(
+                            content: Text('メールアプリを起動できませんでした。'),
                             backgroundColor: Colors.red,
                           ),
                         );
@@ -294,92 +284,94 @@ class AboutAppScreen extends StatelessWidget {
                   ),
                 ),
                 */
-              ],
-            ),
+            ],
+          ),
 
-            const SizedBox(height: 48),
+          const SizedBox(height: 48),
 
-            // 開発状況リンク
-            const Text(
-              '開発状況',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'NotoSansJP',
-              ),
+          // 開発状況リンク
+          const Text(
+            '開発状況',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              fontFamily: 'NotoSansJP',
             ),
-            const SizedBox(height: 16),
-            Center(
-              child: GestureDetector(
-                onTap: () async {
-                  final Uri url =
-                      Uri.parse('https://trello.com/b/ZV0wMiZc/location-memo');
-                  try {
-                    if (await canLaunchUrl(url)) {
-                      await launchUrl(url,
-                          mode: LaunchMode.externalApplication);
-                    } else {
-                      // フォールバック: デフォルトブラウザで開く
-                      await launchUrl(url, mode: LaunchMode.platformDefault);
-                    }
-                  } catch (e) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Trelloページを開けませんでした: $e'),
-                          backgroundColor: Colors.red,
-                        ),
-                      );
-                    }
+          ),
+          const SizedBox(height: 16),
+          Center(
+            child: GestureDetector(
+              onTap: () async {
+                final Uri url = Uri.parse(
+                  'https://trello.com/b/ZV0wMiZc/location-memo',
+                );
+                try {
+                  if (await canLaunchUrl(url)) {
+                    await launchUrl(url, mode: LaunchMode.externalApplication);
+                  } else {
+                    // フォールバック: デフォルトブラウザで開く
+                    await launchUrl(url, mode: LaunchMode.platformDefault);
                   }
-                },
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0079BF), // Trelloのブランドカラー
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.15),
-                        spreadRadius: 1,
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
+                } catch (_) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Trelloページを開けませんでした。'),
+                        backgroundColor: Colors.red,
                       ),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.dashboard, // Trelloのダッシュボードアイコン
+                    );
+                  }
+                }
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0079BF), // Trelloのブランドカラー
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.15),
+                      spreadRadius: 1,
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.dashboard, // Trelloのダッシュボードアイコン
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                    SizedBox(width: 12),
+                    Text(
+                      '開発状況を見る',
+                      style: TextStyle(
                         color: Colors.white,
-                        size: 24,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: 'NotoSansJP',
                       ),
-                      const SizedBox(width: 12),
-                      const Text(
-                        '開発状況を見る',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          fontFamily: 'NotoSansJP',
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
+          ),
 
-            const SizedBox(height: 16),
+          const SizedBox(height: 16),
 
-            // 開発版注意書き
+          if (!kReleaseMode)
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Theme.of(context).brightness == Brightness.dark
-                    ? Colors.orange.shade900.withOpacity(0.3)
+                    ? Colors.orange.shade900.withValues(alpha: 0.3)
                     : Colors.orange.shade50,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
@@ -400,8 +392,7 @@ class AboutAppScreen extends StatelessWidget {
                 ),
               ),
             ),
-          ],
-        ),
+        ],
       ),
     );
   }

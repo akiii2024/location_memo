@@ -46,13 +46,15 @@ class MemoAdapter extends TypeAdapter<Memo> {
       mushroomHabitat: fields[26] as String?,
       mushroomGrowthPattern: fields[27] as String?,
       layer: fields[28] as int?,
+      syncId: fields[29] as String?,
+      updatedAt: fields[30] as DateTime?,
     );
   }
 
   @override
   void write(BinaryWriter writer, Memo obj) {
     writer
-      ..writeByte(29)
+      ..writeByte(31)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -81,6 +83,12 @@ class MemoAdapter extends TypeAdapter<Memo> {
       ..write(obj.audioPath)
       ..writeByte(13)
       ..write(obj.imagePaths)
+      ..writeByte(28)
+      ..write(obj.layer)
+      ..writeByte(29)
+      ..write(obj.syncId)
+      ..writeByte(30)
+      ..write(obj.updatedAt)
       ..writeByte(14)
       ..write(obj.mushroomCapShape)
       ..writeByte(15)
@@ -108,9 +116,7 @@ class MemoAdapter extends TypeAdapter<Memo> {
       ..writeByte(26)
       ..write(obj.mushroomHabitat)
       ..writeByte(27)
-      ..write(obj.mushroomGrowthPattern)
-      ..writeByte(28)
-      ..write(obj.layer);
+      ..write(obj.mushroomGrowthPattern);
   }
 
   @override

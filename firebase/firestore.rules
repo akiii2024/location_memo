@@ -1,0 +1,131 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function sharedWithIncludes(shared) {
+      return signedIn()
+        && shared != null
+        && (
+          (shared is list && request.auth.uid in shared)
+          || (shared is map
+            && shared[request.auth.uid] != null
+            && shared[request.auth.uid] != false)
+        );
+    }
+
+    function mapDocPath(userId, mapId) {
+      return /databases/$(database)/documents/users/$(userId)/maps/$(mapId);
+    }
+
+    function hasMapAccess(userId, mapId) {
+      return isOwner(userId)
+        || (
+          signedIn()
+          && exists(mapDocPath(userId, mapId))
+          && sharedWithIncludes(get(mapDocPath(userId, mapId)).data.sharedWith)
+        );
+    }
+
+    function validProfile(userId) {
+      return isOwner(userId)
+        && request.resource.data.keys().hasOnly([
+          'email',
+          'emailLower',
+          'displayName',
+          'photoUrl',
+          'isGuest',
+          'createdAt',
+          'updatedAt'
+        ])
+        && request.resource.data.isGuest is bool
+        && (
+          (request.resource.data.isGuest == true
+            && request.resource.data.email == null
+            && request.resource.data.emailLower == null)
+          || (request.resource.data.isGuest == false
+            && request.auth.token.email is string
+            && request.resource.data.email == request.auth.token.email
+            && request.resource.data.emailLower == request.auth.token.email.lower())
+        );
+    }
+
+    function validMapRecord(userId) {
+      return request.resource.data.ownerId == userId
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 200
+        && request.resource.data.memoCount is int
+        && request.resource.data.memoCount >= 0
+        && request.resource.data.memoCount <= 100000;
+    }
+
+    function validMemoRecord() {
+      return request.resource.data.title is string
+        && request.resource.data.title.size() <= 500
+        && request.resource.data.content is string
+        && request.resource.data.content.size() <= 100000
+        && (!('notes' in request.resource.data)
+          || request.resource.data.notes == null
+          || (request.resource.data.notes is string
+            && request.resource.data.notes.size() <= 100000))
+        && (!('imageUrls' in request.resource.data)
+          || request.resource.data.imageUrls is list)
+        && (!('audioUrl' in request.resource.data)
+          || request.resource.data.audioUrl == null
+          || request.resource.data.audioUrl is string);
+    }
+
+    // プロフィールは既知のUIDに対する単一取得だけを許可し、一覧列挙を禁止する。
+    match /userProfiles/{userId} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create, update: if validProfile(userId);
+      allow delete: if isOwner(userId);
+    }
+
+    // メール共有用の完全一致ディレクトリ。クエリによるメール一覧取得は不可。
+    match /shareDirectory/{normalizedEmail} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn()
+        && request.auth.token.email is string
+        && normalizedEmail == request.auth.token.email.lower()
+        && request.resource.data.keys().hasOnly(['uid', 'displayName', 'updatedAt'])
+        && request.resource.data.uid == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.uid == request.auth.uid
+        && request.auth.token.email is string
+        && normalizedEmail == request.auth.token.email.lower()
+        && request.resource.data.keys().hasOnly(['uid', 'displayName', 'updatedAt'])
+        && request.resource.data.uid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    match /users/{userId}/maps/{mapId} {
+      allow create, update: if isOwner(userId)
+        && validMapRecord(userId);
+      allow delete: if isOwner(userId);
+      allow read: if isOwner(userId)
+        || sharedWithIncludes(resource.data.sharedWith);
+    }
+
+    // 共有ユーザーは共同編集者としてメモを更新できる。
+    match /users/{userId}/maps/{mapId}/memos/{memoId} {
+      allow read, delete: if hasMapAccess(userId, mapId);
+      allow create, update: if hasMapAccess(userId, mapId)
+        && validMemoRecord();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

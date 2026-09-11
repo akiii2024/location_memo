@@ -1,7 +1,7 @@
+import '../utils/app_logger.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
@@ -20,13 +20,13 @@ class CustomMapWidget extends StatefulWidget {
   final VoidCallback? onMemosUpdated; // メモ更新時のコールバックを追加
 
   const CustomMapWidget({
-    Key? key,
+    super.key,
     required this.memos,
     required this.onTap,
     required this.onMemoTap,
     this.customImagePath,
     this.onMemosUpdated, // コールバックを追加
-  }) : super(key: key);
+  });
 
   @override
   CustomMapWidgetState createState() => CustomMapWidgetState();
@@ -37,8 +37,8 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
   final TransformationController _transformationController =
       TransformationController();
   final GlobalKey _mapViewportKey = GlobalKey();
-  double _mapWidth = 800.0;
-  double _mapHeight = 600.0;
+  final double _mapWidth = 800.0;
+  final double _mapHeight = 600.0;
   double _actualDisplayWidth = 800.0;
   double _actualDisplayHeight = 600.0;
   double _offsetX = 0.0;
@@ -81,13 +81,13 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
   void _onTransformChanged() {
     final Matrix4 matrix = _transformationController.value;
     final double newScale = matrix.getMaxScaleOnAxis();
-    print('スケール変更: $_currentScale -> $newScale'); // デバッグ用
+    appLog('スケール変更: $_currentScale -> $newScale'); // デバッグ用
     if ((newScale - _currentScale).abs() > 0.01) {
       // より小さな変化も検知
       setState(() {
         _currentScale = newScale;
       });
-      print('ピンサイズ: ${_getPinSize()}'); // デバッグ用
+      appLog('ピンサイズ: ${_getPinSize()}'); // デバッグ用
     }
   }
 
@@ -105,8 +105,9 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
     final double adjustedSize = baseSize * scaleFactor;
     final double clampedSize = adjustedSize.clamp(minSize, maxSize);
 
-    print(
-        'ピンサイズ計算: スケール=$_currentScale, 係数=$scaleFactor, 調整サイズ=$adjustedSize, 最終サイズ=$clampedSize'); // デバッグ用
+    appLog(
+      'ピンサイズ計算: スケール=$_currentScale, 係数=$scaleFactor, 調整サイズ=$adjustedSize, 最終サイズ=$clampedSize',
+    ); // デバッグ用
 
     return clampedSize;
   }
@@ -151,7 +152,7 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
         }
       }
     } catch (e) {
-      print('地図ファイルの読み込み中にエラーが発生しました: $e');
+      appLog('地図ファイルの読み込み中にエラーが発生しました: $e');
     }
   }
 
@@ -187,6 +188,7 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
         type: FileType.custom,
         allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf'],
       );
+      if (!mounted) return;
 
       if (result != null) {
         if (kIsWeb) {
@@ -198,6 +200,7 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
           // Hiveに保存
           final box = await Hive.openBox('app_settings');
           await box.put('custom_map_image', dataUrl);
+          if (!mounted) return;
 
           setState(() {
             _mapImagePath = dataUrl;
@@ -212,48 +215,21 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
           final savedFile = File('${directory.path}/$fileName');
 
           await selectedFile.copy(savedFile.path);
+          if (!mounted) return;
 
           setState(() {
             _mapImagePath = savedFile.path;
           });
         }
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('地図画像を設定しました')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('地図画像を設定しました')));
       }
-    } catch (e) {
+    } catch (_) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('ファイル選択中にエラーが発生しました: $e')),
-      );
-    }
-  }
-
-  Future<void> _clearMapImage() async {
-    try {
-      if (kIsWeb) {
-        // Web版: Hiveからデータを削除
-        final box = await Hive.openBox('app_settings');
-        await box.delete('custom_map_image');
-      } else {
-        // モバイル版: ファイルを削除
-        final directory = await getApplicationDocumentsDirectory();
-        final mapFile = File('${directory.path}/custom_map.png');
-        if (await mapFile.exists()) {
-          await mapFile.delete();
-        }
-      }
-
-      setState(() {
-        _mapImagePath = null;
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('地図画像をクリアしました')),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('ファイル削除中にエラーが発生しました: $e')),
+        const SnackBar(content: Text('地図画像を設定できませんでした。再試行してください。')),
       );
     }
   }
@@ -266,7 +242,8 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
       return;
     }
 
-    final double relativeX = (localPosition.dx - _offsetX) / _actualDisplayWidth;
+    final double relativeX =
+        (localPosition.dx - _offsetX) / _actualDisplayWidth;
     final double relativeY =
         (localPosition.dy - _offsetY) / _actualDisplayHeight;
 
@@ -287,11 +264,7 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
-              Icons.map_outlined,
-              size: 64,
-              color: Colors.grey,
-            ),
+            const Icon(Icons.map_outlined, size: 64, color: Colors.grey),
             const SizedBox(height: 16),
             const Text(
               'カスタム地図が設定されていません',
@@ -325,12 +298,12 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
         // スケール値の更新を直接監視
         final Matrix4 matrix = _transformationController.value;
         final double newScale = matrix.getMaxScaleOnAxis();
-        print('インタラクション更新: スケール = $newScale'); // デバッグ用
+        appLog('インタラクション更新: スケール = $newScale'); // デバッグ用
         if ((newScale - _currentScale).abs() > 0.01) {
           setState(() {
             _currentScale = newScale;
           });
-          print('ピンサイズ更新: ${_getPinSize()}'); // デバッグ用
+          appLog('ピンサイズ更新: ${_getPinSize()}'); // デバッグ用
         }
       },
       child: GestureDetector(
@@ -340,7 +313,7 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
           // localPosition is already reported in the transformed child space.
           _handleMapTap(details.localPosition);
         },
-        child: Container(
+        child: SizedBox(
           width: _mapWidth,
           height: _mapHeight,
           child: LayoutBuilder(
@@ -382,11 +355,11 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
                         height: _actualDisplayHeight,
                         child: kIsWeb
                             ?
-                            // Web版: Base64データから画像を表示
-                            _buildWebImage(_mapImagePath!)
+                              // Web版: Base64データから画像を表示
+                              _buildWebImage(_mapImagePath!)
                             :
-                            // モバイル版: ファイルから画像を表示
-                            Image.file(
+                              // モバイル版: ファイルから画像を表示
+                              Image.file(
                                 File(_mapImagePath!),
                                 fit: BoxFit.fill,
                                 errorBuilder: (context, error, stackTrace) {
@@ -403,89 +376,100 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
                       // ピンは画像読み込み完了後のみ表示
                       if (snapshot.hasData)
                         ...widget.memos
-                            .where((memo) =>
-                                memo.latitude != null && memo.longitude != null)
+                            .where(
+                              (memo) =>
+                                  memo.latitude != null &&
+                                  memo.longitude != null,
+                            )
                             .map((memo) {
-                          // 地図上の相対位置からピクセル位置を計算（実際の表示サイズを使用）
-                          final double pinX =
-                              memo.latitude! * _actualDisplayWidth + _offsetX;
-                          final double pinY =
-                              memo.longitude! * _actualDisplayHeight + _offsetY;
+                              // 地図上の相対位置からピクセル位置を計算（実際の表示サイズを使用）
+                              final double pinX =
+                                  memo.latitude! * _actualDisplayWidth +
+                                  _offsetX;
+                              final double pinY =
+                                  memo.longitude! * _actualDisplayHeight +
+                                  _offsetY;
 
-                          // ズーム倍率に応じたサイズを計算
-                          final double pinSize = _getPinSize();
-                          final double iconSize = _getIconSize();
-                          final double pinNumberSize = _getPinNumberSize();
-                          final double pinNumberFontSize =
-                              _getPinNumberFontSize();
+                              // ズーム倍率に応じたサイズを計算
+                              final double pinSize = _getPinSize();
+                              final double iconSize = _getIconSize();
+                              final double pinNumberSize = _getPinNumberSize();
+                              final double pinNumberFontSize =
+                                  _getPinNumberFontSize();
 
-                          return Positioned(
-                            left: pinX - pinSize / 2,
-                            top: pinY - pinSize / 2,
-                            child: GestureDetector(
-                              // iOS PWA タッチ反応問題を解決するため、タッチ動作を最適化
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () => widget.onMemoTap(memo),
-                              onLongPress: () =>
-                                  _showPinNumberDialog(memo), // 長押しで番号編集
-                              child: Container(
-                                width: pinSize,
-                                height: pinSize,
-                                decoration: BoxDecoration(
-                                  color: _getCategoryColor(memo.category),
-                                  shape: BoxShape.circle,
-                                  border:
-                                      Border.all(color: Colors.white, width: 2),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.3),
-                                      blurRadius: 4,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: Stack(
-                                  children: [
-                                    // カテゴリアイコン
-                                    Center(
-                                      child: Icon(
-                                        _getCategoryIcon(memo.category),
+                              return Positioned(
+                                left: pinX - pinSize / 2,
+                                top: pinY - pinSize / 2,
+                                child: GestureDetector(
+                                  // iOS PWA タッチ反応問題を解決するため、タッチ動作を最適化
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: () => widget.onMemoTap(memo),
+                                  onLongPress: () =>
+                                      _showPinNumberDialog(memo), // 長押しで番号編集
+                                  child: Container(
+                                    width: pinSize,
+                                    height: pinSize,
+                                    decoration: BoxDecoration(
+                                      color: _getCategoryColor(memo.category),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
                                         color: Colors.white,
-                                        size: iconSize,
+                                        width: 2,
                                       ),
-                                    ),
-                                    // ピン番号
-                                    if (memo.pinNumber != null)
-                                      Positioned(
-                                        top: 0,
-                                        right: 0,
-                                        child: Container(
-                                          width: pinNumberSize,
-                                          height: pinNumberSize,
-                                          decoration: BoxDecoration(
-                                            color: Colors.red,
-                                            shape: BoxShape.circle,
-                                            border: Border.all(
-                                                color: Colors.white, width: 1),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.3,
                                           ),
-                                          child: Center(
-                                            child: Text(
-                                              '${memo.pinNumber}',
-                                              style: TextStyle(
-                                                color: Colors.white,
-                                                fontSize: pinNumberFontSize,
-                                                fontWeight: FontWeight.bold,
+                                          blurRadius: 4,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Stack(
+                                      children: [
+                                        // カテゴリアイコン
+                                        Center(
+                                          child: Icon(
+                                            _getCategoryIcon(memo.category),
+                                            color: Colors.white,
+                                            size: iconSize,
+                                          ),
+                                        ),
+                                        // ピン番号
+                                        if (memo.pinNumber != null)
+                                          Positioned(
+                                            top: 0,
+                                            right: 0,
+                                            child: Container(
+                                              width: pinNumberSize,
+                                              height: pinNumberSize,
+                                              decoration: BoxDecoration(
+                                                color: Colors.red,
+                                                shape: BoxShape.circle,
+                                                border: Border.all(
+                                                  color: Colors.white,
+                                                  width: 1,
+                                                ),
+                                              ),
+                                              child: Center(
+                                                child: Text(
+                                                  '${memo.pinNumber}',
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: pinNumberFontSize,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
                                               ),
                                             ),
                                           ),
-                                        ),
-                                      ),
-                                  ],
+                                      ],
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                          );
-                        }).toList(),
+                              );
+                            }),
                     ],
                   );
                 },
@@ -516,18 +500,14 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
         errorBuilder: (context, error, stackTrace) {
           return Container(
             color: Colors.grey[300],
-            child: const Center(
-              child: Text('地図画像を読み込めませんでした'),
-            ),
+            child: const Center(child: Text('地図画像を読み込めませんでした')),
           );
         },
       );
     } catch (e) {
       return Container(
         color: Colors.grey[300],
-        child: const Center(
-          child: Text('地図画像の形式が正しくありません'),
-        ),
+        child: const Center(child: Text('地図画像の形式が正しくありません')),
       );
     }
   }
@@ -578,7 +558,7 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
 
     showDialog(
       context: context,
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogContext) {
         return AlertDialog(
           title: const Text('ピン番号を編集'),
           content: Column(
@@ -599,7 +579,7 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () => Navigator.of(dialogContext).pop(),
               child: const Text('キャンセル'),
             ),
             TextButton(
@@ -607,30 +587,21 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
                 final newNumber = int.tryParse(controller.text);
                 if (newNumber != null && newNumber > 0) {
                   // メモを更新
-                  final updatedMemo = Memo(
-                    id: memo.id,
-                    title: memo.title,
-                    content: memo.content,
-                    latitude: memo.latitude,
-                    longitude: memo.longitude,
-                    discoveryTime: memo.discoveryTime,
-                    discoverer: memo.discoverer,
-                    specimenNumber: memo.specimenNumber,
-                    category: memo.category,
-                    notes: memo.notes,
-                    pinNumber: newNumber,
-                  );
+                  memo.pinNumber = newNumber;
+                  final updatedMemo = memo;
 
                   await DatabaseHelper.instance.update(updatedMemo);
+                  if (!mounted) return;
                   try {
                     await CollaborationSyncCoordinator.instance
                         .onLocalMemoUpdated(updatedMemo);
                   } catch (error, stackTrace) {
-                    debugPrint('Failed to sync pin update: $error');
-                    debugPrintStack(stackTrace: stackTrace);
+                    appLog('Failed to sync pin update: $error');
+                    appLog('Stack trace', stackTrace);
+                    if (!mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('共同編集への同期に失敗しました: $error'),
+                      const SnackBar(
+                        content: Text('端末には保存しました。クラウド同期は後で再試行します。'),
                         backgroundColor: Colors.orange,
                       ),
                     );
@@ -641,13 +612,16 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
                     widget.onMemosUpdated!();
                   }
 
-                  Navigator.of(context).pop();
+                  if (dialogContext.mounted) {
+                    Navigator.of(dialogContext).pop();
+                  }
 
+                  if (!mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text('ピン番号を $newNumber に更新しました')),
                   );
                 } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(
                     const SnackBar(content: Text('有効な番号を入力してください')),
                   );
                 }
@@ -678,8 +652,9 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
 
     // ビューポートのサイズを取得
     final renderObject = _mapViewportKey.currentContext?.findRenderObject();
-    final RenderBox? renderBox =
-        renderObject is RenderBox ? renderObject : null;
+    final RenderBox? renderBox = renderObject is RenderBox
+        ? renderObject
+        : null;
     if (renderBox == null) return;
 
     final Size viewportSize = renderBox.size;
@@ -691,9 +666,9 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
 
     // ビューポート中央を基準にスケール変更を適用
     final Matrix4 newMatrix = Matrix4.identity()
-      ..translate(viewportCenterX, viewportCenterY)
-      ..scale(scaleChange)
-      ..translate(-viewportCenterX, -viewportCenterY)
+      ..translateByDouble(viewportCenterX, viewportCenterY, 0, 1)
+      ..scaleByDouble(scaleChange, scaleChange, scaleChange, 1)
+      ..translateByDouble(-viewportCenterX, -viewportCenterY, 0, 1)
       ..multiply(currentMatrix);
 
     _transformationController.value = newMatrix;
@@ -702,7 +677,7 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
     setState(() {
       _currentScale = scale;
     });
-    print('手動スケール設定: $scale, ピンサイズ: ${_getPinSize()}'); // デバッグ用
+    appLog('手動スケール設定: $scale, ピンサイズ: ${_getPinSize()}'); // デバッグ用
   }
 
   // リセット機能
@@ -711,7 +686,7 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
     setState(() {
       _currentScale = 1.0;
     });
-    print('変換リセット: スケール = 1.0, ピンサイズ: ${_getPinSize()}'); // デバッグ用
+    appLog('変換リセット: スケール = 1.0, ピンサイズ: ${_getPinSize()}'); // デバッグ用
   }
 
   @override
@@ -768,7 +743,7 @@ class CustomMapWidgetState extends State<CustomMapWidget> {
 
         // 地図表示エリア
         Expanded(
-          child: Container(
+          child: SizedBox(
             key: _mapViewportKey,
             width: double.infinity,
             child: _buildMapContent(),

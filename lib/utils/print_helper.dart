@@ -1,16 +1,14 @@
 import 'dart:io';
+import 'app_logger.dart';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'dart:convert'; // Base64デコード用
 // Web環境での機能は動的に処理
 import 'web_print_helper_stub.dart'
@@ -29,9 +27,7 @@ class _PreparedMemoPrintItem {
 }
 
 class _PreparedMemoImageRow {
-  const _PreparedMemoImageRow({
-    required this.height,
-  });
+  const _PreparedMemoImageRow({required this.height});
 
   final double height;
 }
@@ -100,16 +96,17 @@ class PrintHelper {
   static Future<pw.Font> _getJapaneseFont() async {
     try {
       // assetsからNotoSansJPフォントを読み込み
-      final fontData =
-          await rootBundle.load('assets/fonts/NotoSansJP-Regular.ttf');
+      final fontData = await rootBundle.load(
+        'assets/fonts/NotoSansJP-Regular.ttf',
+      );
       return pw.Font.ttf(fontData);
     } catch (e) {
-      print('日本語フォント取得エラー: $e');
+      appLog('日本語フォント取得エラー: $e');
       // フォールバック: オンラインのNotoSansを試行
       try {
         return await PdfGoogleFonts.notoSansRegular();
       } catch (e2) {
-        print('オンラインフォント取得エラー: $e2');
+        appLog('オンラインフォント取得エラー: $e2');
         // 最終フォールバック: デフォルトフォント
         return pw.Font.helvetica();
       }
@@ -119,16 +116,17 @@ class PrintHelper {
   static Future<pw.Font> _getJapaneseBoldFont() async {
     try {
       // assetsからNotoSansJPボールドフォントを読み込み
-      final fontData =
-          await rootBundle.load('assets/fonts/NotoSansJP-Bold.ttf');
+      final fontData = await rootBundle.load(
+        'assets/fonts/NotoSansJP-Bold.ttf',
+      );
       return pw.Font.ttf(fontData);
     } catch (e) {
-      print('日本語ボールドフォント取得エラー: $e');
+      appLog('日本語ボールドフォント取得エラー: $e');
       // フォールバック: オンラインのNotoSansを試行
       try {
         return await PdfGoogleFonts.notoSansBold();
       } catch (e2) {
-        print('オンラインボールドフォント取得エラー: $e2');
+        appLog('オンラインボールドフォント取得エラー: $e2');
         // 最終フォールバック: デフォルトフォント
         return pw.Font.helveticaBold();
       }
@@ -136,8 +134,11 @@ class PrintHelper {
   }
 
   // テキストスタイルを作成するヘルパーメソッド
-  static pw.TextStyle _createTextStyle(pw.Font font, double fontSize,
-      {PdfColor? color}) {
+  static pw.TextStyle _createTextStyle(
+    pw.Font font,
+    double fontSize, {
+    PdfColor? color,
+  }) {
     return pw.TextStyle(
       font: font,
       fontSize: fontSize,
@@ -154,14 +155,16 @@ class PrintHelper {
     try {
       WebPrintHelper.downloadPdfInWeb(pdfBytes, filename);
     } catch (e) {
-      print('Web PDFダウンロードエラー: $e');
+      appLog('Web PDFダウンロードエラー: $e');
     }
   }
 
   // 印刷またはダウンロード処理（Web版の制限に対応）
   static Future<void> _printOrDownloadPdf(
-      pw.Document pdf, String defaultFilename,
-      {bool showSuccessMessage = true}) async {
+    pw.Document pdf,
+    String defaultFilename, {
+    bool showSuccessMessage = true,
+  }) async {
     try {
       if (kIsWeb && _isMobileWeb()) {
         // モバイルWebブラウザ（iPhone Safari等）の場合は直接ダウンロード
@@ -169,7 +172,7 @@ class PrintHelper {
         _downloadPdfInWeb(pdfBytes, defaultFilename);
 
         if (showSuccessMessage) {
-          print('PDFをダウンロードしました: $defaultFilename');
+          appLog('PDFをダウンロードしました: $defaultFilename');
         }
       } else {
         // デスクトップブラウザまたはネイティブアプリの場合は印刷ダイアログを表示
@@ -179,7 +182,7 @@ class PrintHelper {
           );
         } catch (printError) {
           // 印刷に失敗した場合はダウンロードにフォールバック
-          print('印刷に失敗しました。ダウンロードします: $printError');
+          appLog('印刷に失敗しました。ダウンロードします: $printError');
           final pdfBytes = await pdf.save();
 
           if (kIsWeb) {
@@ -192,7 +195,7 @@ class PrintHelper {
           }
 
           if (showSuccessMessage) {
-            print('PDFをダウンロードしました: $defaultFilename');
+            appLog('PDFをダウンロードしました: $defaultFilename');
           }
         }
       }
@@ -271,11 +274,7 @@ class PrintHelper {
           ..color = pinColor
           ..style = PaintingStyle.fill;
 
-        canvas.drawCircle(
-          Offset(imagePinX, imagePinY),
-          pinRadius,
-          pinPaint,
-        );
+        canvas.drawCircle(Offset(imagePinX, imagePinY), pinRadius, pinPaint);
 
         // ピンの境界線を描画
         final borderPaint = Paint()
@@ -283,11 +282,7 @@ class PrintHelper {
           ..style = PaintingStyle.stroke
           ..strokeWidth = strokeWidth;
 
-        canvas.drawCircle(
-          Offset(imagePinX, imagePinY),
-          pinRadius,
-          borderPaint,
-        );
+        canvas.drawCircle(Offset(imagePinX, imagePinY), pinRadius, borderPaint);
 
         // ピン番号を描画
         if (memo.pinNumber != null) {
@@ -317,10 +312,7 @@ class PrintHelper {
 
     // 画像を生成
     final picture = recorder.endRecording();
-    final image = await picture.toImage(
-      mapImage.width,
-      mapImage.height,
-    );
+    final image = await picture.toImage(mapImage.width, mapImage.height);
     final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
     return byteData!.buffer.asUint8List();
   }
@@ -347,8 +339,12 @@ class PrintHelper {
 
   // ピン付き地図を印刷する新しいメソッド
   static Future<void> printMapWithPins(
-      String? mapImagePath, List<Memo> memos, double mapWidth, double mapHeight,
-      {String? mapName}) async {
+    String? mapImagePath,
+    List<Memo> memos,
+    double mapWidth,
+    double mapHeight, {
+    String? mapName,
+  }) async {
     if (!_isValidImagePath(mapImagePath)) {
       throw Exception('地図画像が見つかりません');
     }
@@ -411,11 +407,15 @@ class PrintHelper {
 
     // 印刷またはダウンロード
     await _printOrDownloadPdf(
-        pdf, 'fieldwork_map_${DateTime.now().millisecondsSinceEpoch}.pdf');
+      pdf,
+      'fieldwork_map_${DateTime.now().millisecondsSinceEpoch}.pdf',
+    );
   }
 
-  static Future<void> printMapImage(String? mapImagePath,
-      {String? mapName}) async {
+  static Future<void> printMapImage(
+    String? mapImagePath, {
+    String? mapName,
+  }) async {
     if (!_isValidImagePath(mapImagePath)) {
       throw Exception('地図画像が見つかりません');
     }
@@ -464,12 +464,17 @@ class PrintHelper {
     );
 
     // 印刷またはダウンロード
-    await _printOrDownloadPdf(pdf,
-        'fieldwork_map_image_${DateTime.now().millisecondsSinceEpoch}.pdf');
+    await _printOrDownloadPdf(
+      pdf,
+      'fieldwork_map_image_${DateTime.now().millisecondsSinceEpoch}.pdf',
+    );
   }
 
-  static Future<void> printMemoReport(List<Memo> memos,
-      {String? mapImagePath, String? mapName}) async {
+  static Future<void> printMemoReport(
+    List<Memo> memos, {
+    String? mapImagePath,
+    String? mapName,
+  }) async {
     final pdf = pw.Document();
 
     // 日本語フォントを取得
@@ -536,10 +541,7 @@ class PrintHelper {
           margin: const pw.EdgeInsets.all(20),
           build: (pw.Context context) {
             final widgets = <pw.Widget>[
-              pw.Text(
-                '記録一覧',
-                style: _createTextStyle(boldFont, 18),
-              ),
+              pw.Text('記録一覧', style: _createTextStyle(boldFont, 18)),
               pw.SizedBox(height: 20),
             ];
             for (final memoItem in memoItems) {
@@ -558,16 +560,18 @@ class PrintHelper {
 
     // 印刷またはダウンロード
     await _printOrDownloadPdf(
-        pdf, 'fieldwork_report_${DateTime.now().millisecondsSinceEpoch}.pdf');
+      pdf,
+      'fieldwork_report_${DateTime.now().millisecondsSinceEpoch}.pdf',
+    );
   }
 
   static Future<pw.Widget> _buildMemoItem(
-      Memo memo, pw.Font font, pw.Font boldFont) async {
+    Memo memo,
+    pw.Font font,
+    pw.Font boldFont,
+  ) async {
     List<pw.Widget> children = [
-      pw.Text(
-        memo.title,
-        style: _createTextStyle(boldFont, 14),
-      ),
+      pw.Text(memo.title, style: _createTextStyle(boldFont, 14)),
       pw.SizedBox(height: 5),
 
       // 基本情報
@@ -612,10 +616,7 @@ class PrintHelper {
 
       if (memo.content.isNotEmpty) ...[
         pw.SizedBox(height: 8),
-        pw.Text(
-          '説明: ${memo.content}',
-          style: _createTextStyle(font, 11),
-        ),
+        pw.Text('説明: ${memo.content}', style: _createTextStyle(font, 11)),
       ],
 
       if (memo.notes != null && memo.notes!.isNotEmpty) ...[
@@ -764,8 +765,11 @@ class PrintHelper {
                     child: pw.Text(
                       '画像読み込み\nエラー',
                       textAlign: pw.TextAlign.center,
-                      style:
-                          _createTextStyle(font, 8, color: PdfColors.grey600),
+                      style: _createTextStyle(
+                        font,
+                        8,
+                        color: PdfColors.grey600,
+                      ),
                     ),
                   ),
                 ),
@@ -778,11 +782,7 @@ class PrintHelper {
           rowChildren.add(pw.Expanded(child: pw.Container()));
         }
 
-        children.add(
-          pw.Row(
-            children: rowChildren,
-          ),
-        );
+        children.add(pw.Row(children: rowChildren));
 
         if (i + 2 < memo.imagePaths!.length) {
           children.add(pw.SizedBox(height: 5));
@@ -805,7 +805,10 @@ class PrintHelper {
   }
 
   static Future<_PreparedMemoPrintItem> _prepareMemoItem(
-      Memo memo, pw.Font font, pw.Font boldFont) async {
+    Memo memo,
+    pw.Font font,
+    pw.Font boldFont,
+  ) async {
     final imageRows = memo.imagePaths != null && memo.imagePaths!.isNotEmpty
         ? await _prepareMemoImageRows(memo.imagePaths!)
         : const <_PreparedMemoImageRow>[];
@@ -817,7 +820,8 @@ class PrintHelper {
   }
 
   static Future<List<_PreparedMemoImageRow>> _prepareMemoImageRows(
-      List<String> imagePaths) async {
+    List<String> imagePaths,
+  ) async {
     final rows = <_PreparedMemoImageRow>[];
 
     for (int i = 0; i < imagePaths.length; i += 2) {
@@ -841,9 +845,7 @@ class PrintHelper {
       }
 
       rows.add(
-        _PreparedMemoImageRow(
-          height: math.max(firstHeight, secondHeight),
-        ),
+        _PreparedMemoImageRow(height: math.max(firstHeight, secondHeight)),
       );
     }
 
@@ -859,7 +861,9 @@ class PrintHelper {
   }
 
   static double _estimateMemoItemHeight(
-      Memo memo, List<_PreparedMemoImageRow> imageRows) {
+    Memo memo,
+    List<_PreparedMemoImageRow> imageRows,
+  ) {
     double height = (_memoItemPadding * 2) + _memoItemBottomMargin;
 
     height += _estimateTextHeight(memo.title, 14);
@@ -907,8 +911,10 @@ class PrintHelper {
 
   static double _estimateTextHeight(String text, double fontSize) {
     final normalized = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-    final charsPerLine =
-        math.max(1, (_memoEstimatedTextWidth / fontSize).floor());
+    final charsPerLine = math.max(
+      1,
+      (_memoEstimatedTextWidth / fontSize).floor(),
+    );
 
     int wrappedLines = 0;
     for (final line in normalized.split('\n')) {
@@ -933,14 +939,20 @@ class PrintHelper {
     await printMemoReport(memos);
   }
 
-  static Future<void> printMapWithMemos(List<Memo> memos, String? mapImagePath,
-      {String? mapName}) async {
+  static Future<void> printMapWithMemos(
+    List<Memo> memos,
+    String? mapImagePath, {
+    String? mapName,
+  }) async {
     // 地図画像のみを印刷
     await printMapImage(mapImagePath, mapName: mapName);
   }
 
-  static Future<void> savePdfReport(List<Memo> memos,
-      {String? mapImagePath, String? mapName}) async {
+  static Future<void> savePdfReport(
+    List<Memo> memos, {
+    String? mapImagePath,
+    String? mapName,
+  }) async {
     try {
       final pdf = pw.Document();
       // 日本語フォントを取得
@@ -1007,16 +1019,15 @@ class PrintHelper {
             margin: const pw.EdgeInsets.all(20),
             build: (pw.Context context) {
               final widgets = <pw.Widget>[
-                pw.Text(
-                  '記録一覧',
-                  style: _createTextStyle(boldFont, 18),
-                ),
+                pw.Text('記録一覧', style: _createTextStyle(boldFont, 18)),
                 pw.SizedBox(height: 20),
               ];
               for (final memoItem in memoItems) {
                 widgets.add(
                   pw.NewPage(
-                    freeSpace: _memoPageBreakThreshold(memoItem.estimatedHeight),
+                    freeSpace: _memoPageBreakThreshold(
+                      memoItem.estimatedHeight,
+                    ),
                   ),
                 );
                 widgets.add(memoItem.widget);
@@ -1031,13 +1042,16 @@ class PrintHelper {
       if (kIsWeb) {
         // Web版: 直接ダウンロード
         final pdfBytes = await pdf.save();
-        _downloadPdfInWeb(pdfBytes,
-            'fieldwork_report_${DateTime.now().millisecondsSinceEpoch}.pdf');
+        _downloadPdfInWeb(
+          pdfBytes,
+          'fieldwork_report_${DateTime.now().millisecondsSinceEpoch}.pdf',
+        );
       } else {
         // モバイル版: ファイルシステムに保存
         final output = await getApplicationDocumentsDirectory();
         final file = File(
-            '${output.path}/fieldwork_report_${DateTime.now().millisecondsSinceEpoch}.pdf');
+          '${output.path}/fieldwork_report_${DateTime.now().millisecondsSinceEpoch}.pdf',
+        );
         await file.writeAsBytes(await pdf.save());
       }
 

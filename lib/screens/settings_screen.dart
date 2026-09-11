@@ -1,4 +1,6 @@
+import '../utils/app_logger.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -12,33 +14,46 @@ import '../utils/app_info.dart';
 import '../utils/ai_service.dart';
 import '../utils/backup_service.dart';
 import '../utils/database_helper.dart';
+import '../utils/diagnostic_log_store.dart';
 import '../utils/default_values.dart';
+import '../utils/audio_service.dart';
+import '../utils/collaboration_metadata_store.dart';
+import '../utils/firebase_map_service.dart';
+import '../utils/image_helper.dart';
+import '../utils/crash_reporting_service.dart';
+import '../utils/firebase_availability.dart';
+import '../utils/feature_flags.dart';
+import '../utils/sync_queue.dart';
 import 'package:location_memo/utils/offline_mode_provider.dart';
 import '../models/map_info.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({Key? key}) : super(key: key);
+  const SettingsScreen({super.key});
 
   @override
-  _SettingsScreenState createState() => _SettingsScreenState();
+  State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _isTestingConnection = false;
   bool _isBackingUp = false;
   bool _isRestoring = false;
   bool _isMapBackingUp = false;
   bool _isMapRestoring = false;
   bool _isSigningOut = false;
+  bool _isDeletingAccount = false;
+  bool _isDeletingLocalData = false;
+  bool _isTestingConnection = false;
   BackupInfo? _backupInfo;
   List<MapInfo> _maps = [];
+  bool _crashReportingEnabled = true;
 
   @override
   void initState() {
     super.initState();
     _loadBackupInfo();
     _loadMaps();
+    _crashReportingEnabled = CrashReportingService.instance.enabled;
   }
 
   Future<void> _loadBackupInfo() async {
@@ -60,6 +75,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   String _currentUserSubtitle() {
+    if (!FirebaseAvailability.isReady) {
+      return 'クラウドへ接続していません';
+    }
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       return 'ログイン状態ではありません';
@@ -122,15 +140,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) {
         return;
       }
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const AuthScreen()),
-        (route) => false,
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ログアウトしました。端末内の記録は保持されています。')),
       );
     } catch (error) {
+      appLog('Sign out failed: $error');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('ログアウトに失敗しました: $error')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('ログアウトに失敗しました。')));
       }
     } finally {
       if (mounted) {
@@ -138,6 +157,268 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _isSigningOut = false;
         });
       }
+    }
+  }
+
+  Future<void> _deleteAccount() async {
+    if (_isDeletingAccount) {
+      return;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.warning_amber_rounded, color: Colors.red),
+        title: const Text('アカウントを完全に削除'),
+        content: const SingleChildScrollView(
+          child: Text(
+            'アカウントとクラウド上の地図・メモ・写真・音声を削除します。\n\n'
+            '端末内の記録は保持されます。この操作は取り消せません。',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('削除を続ける'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    String? password;
+    final usesPassword = user.providerData.any(
+      (provider) => provider.providerId == EmailAuthProvider.PROVIDER_ID,
+    );
+    if (usesPassword) {
+      password = await _requestPasswordForDeletion();
+      if (password == null || !mounted) {
+        return;
+      }
+    }
+
+    setState(() => _isDeletingAccount = true);
+    try {
+      if (usesPassword) {
+        final email = user.email;
+        if (email == null || password == null) {
+          throw StateError('再認証に必要なメールアドレスを取得できません。');
+        }
+        await user.reauthenticateWithCredential(
+          EmailAuthProvider.credential(email: email, password: password),
+        );
+      }
+
+      await FirebaseMapService.instance.deleteCurrentUserCloudData();
+      await user.delete();
+
+      if (!mounted) {
+        return;
+      }
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('アカウントとクラウドデータを削除しました。端末内の記録は保持されています。')),
+      );
+    } on FirebaseAuthException catch (error) {
+      if (mounted) {
+        final message = switch (error.code) {
+          'wrong-password' || 'invalid-credential' => 'パスワードが正しくありません。',
+          'too-many-requests' => '試行回数が多すぎます。時間をおいて再試行してください。',
+          'requires-recent-login' => '安全のため、一度ログアウトして再ログイン後にお試しください。',
+          _ => 'アカウントを削除できませんでした。時間をおいて再試行してください。',
+        };
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message), backgroundColor: Colors.red),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('データの削除に失敗しました。通信状況を確認して再試行してください。'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isDeletingAccount = false);
+      }
+    }
+  }
+
+  Future<void> _deleteLocalData() async {
+    if (_isDeletingLocalData) return;
+    final maps = await DatabaseHelper.instance.readAllMaps();
+    final memos = await DatabaseHelper.instance.readAllMemos();
+    if (!mounted) return;
+    final firstConfirmation = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.delete_forever, color: Colors.red),
+        title: const Text('端末内の全データを削除'),
+        content: Text(
+          '地図 ${maps.length}件、メモ ${memos.length}件と端末内の添付ファイルを削除します。\n\n'
+          'クラウド上のデータは削除されません。この操作は取り消せません。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('次へ'),
+          ),
+        ],
+      ),
+    );
+    if (firstConfirmation != true || !mounted) return;
+
+    final controller = TextEditingController();
+    final secondConfirmation = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('最終確認'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('確認のため「位置メモを削除」と入力してください。'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                onChanged: (_) => setDialogState(() {}),
+                decoration: const InputDecoration(labelText: '確認用テキスト'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('キャンセル'),
+            ),
+            FilledButton(
+              onPressed: controller.text == '位置メモを削除'
+                  ? () => Navigator.pop(context, true)
+                  : null,
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text('完全に削除'),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
+    if (secondConfirmation != true || !mounted) return;
+
+    setState(() => _isDeletingLocalData = true);
+    try {
+      final imagePaths = <String>[
+        ...maps.map((map) => map.imagePath).whereType<String>(),
+        ...memos.expand((memo) => memo.imagePaths ?? const <String>[]),
+      ];
+      final audioPaths = memos
+          .map((memo) => memo.audioPath)
+          .whereType<String>();
+      await DatabaseHelper.instance.clearAllDataAtomically();
+      await CollaborationMetadataStore.instance.clear();
+      await SyncQueueStore.instance.clear();
+      await ImageHelper.deleteImages(imagePaths);
+      for (final path in audioPaths) {
+        await AudioService.deleteAudioFile(path);
+      }
+      await _loadBackupInfo();
+      await _loadMaps();
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('端末内の地図・メモ・添付ファイルを削除しました。')));
+    } catch (error, stackTrace) {
+      appLog('Local data deletion failed: ${error.runtimeType}', stackTrace);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('端末内データを削除できませんでした。再試行してください。')),
+      );
+    } finally {
+      if (mounted) setState(() => _isDeletingLocalData = false);
+    }
+  }
+
+  Future<String?> _requestPasswordForDeletion() async {
+    final formKey = GlobalKey<FormState>();
+    final controller = TextEditingController();
+    var obscure = true;
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('本人確認'),
+            content: Form(
+              key: formKey,
+              child: TextFormField(
+                controller: controller,
+                autofocus: true,
+                obscureText: obscure,
+                autofillHints: const [AutofillHints.password],
+                decoration: InputDecoration(
+                  labelText: '現在のパスワード',
+                  prefixIcon: const Icon(Icons.lock_outline),
+                  suffixIcon: IconButton(
+                    tooltip: obscure ? 'パスワードを表示' : 'パスワードを隠す',
+                    onPressed: () => setDialogState(() => obscure = !obscure),
+                    icon: Icon(
+                      obscure
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                  ),
+                ),
+                validator: (value) =>
+                    value == null || value.isEmpty ? 'パスワードを入力してください。' : null,
+                onFieldSubmitted: (_) {
+                  if (formKey.currentState?.validate() == true) {
+                    Navigator.pop(context, controller.text);
+                  }
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('キャンセル'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  if (formKey.currentState?.validate() == true) {
+                    Navigator.pop(context, controller.text);
+                  }
+                },
+                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                child: const Text('完全に削除'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      controller.dispose();
     }
   }
 
@@ -167,10 +448,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
       }
     } catch (e) {
+      appLog('Backup creation failed: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('エラーが発生しました: $e'),
+          const SnackBar(
+            content: Text('バックアップの作成に失敗しました。'),
             backgroundColor: Colors.red,
           ),
         );
@@ -210,10 +492,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
       }
     } catch (e) {
+      appLog('Map backup creation failed: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('エラーが発生しました: $e'),
+          const SnackBar(
+            content: Text('地図のバックアップ作成に失敗しました。'),
             backgroundColor: Colors.red,
           ),
         );
@@ -258,10 +541,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
       }
     } catch (e) {
+      appLog('Backup restore failed: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('エラーが発生しました: $e'),
+          const SnackBar(
+            content: Text('バックアップを復元できませんでした。'),
             backgroundColor: Colors.red,
           ),
         );
@@ -306,10 +590,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
       }
     } catch (e) {
+      appLog('Map backup restore failed: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('エラーが発生しました: $e'),
+          const SnackBar(
+            content: Text('地図のバックアップを復元できませんでした。'),
             backgroundColor: Colors.red,
           ),
         );
@@ -369,11 +654,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               title: Text(
                                 map.title,
                                 style: const TextStyle(
-                                    fontWeight: FontWeight.bold),
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                               subtitle: info != null
                                   ? Text(
-                                      'メモ: ${info.totalMemos}件${info.hasImage ? ' • 画像あり' : ''}')
+                                      'メモ: ${info.totalMemos}件${info.hasImage ? ' • 画像あり' : ''}',
+                                    )
                                   : const Text('読み込み中...'),
                               trailing: IconButton(
                                 icon: const Icon(Icons.backup),
@@ -419,7 +706,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: Theme.of(context).brightness == Brightness.dark
-                        ? Colors.blue.shade900.withOpacity(0.3)
+                        ? Colors.blue.shade900.withValues(alpha: 0.3)
                         : Colors.blue.shade50,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
@@ -461,7 +748,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: Theme.of(context).brightness == Brightness.dark
-                      ? Colors.green.shade900.withOpacity(0.3)
+                      ? Colors.green.shade900.withValues(alpha: 0.3)
                       : Colors.green.shade50,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
@@ -475,7 +762,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.backup, color: Colors.green, size: 20),
+                        const Icon(Icons.backup, color: Colors.green, size: 20),
                         const SizedBox(width: 8),
                         Text(
                           '全体バックアップ',
@@ -503,8 +790,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Icon(Icons.backup),
                         label: Text(_isBackingUp ? 'バックアップ中...' : 'バックアップを作成'),
@@ -523,7 +811,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: Theme.of(context).brightness == Brightness.dark
-                      ? Colors.blue.shade900.withOpacity(0.3)
+                      ? Colors.blue.shade900.withValues(alpha: 0.3)
                       : Colors.blue.shade50,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
@@ -537,7 +825,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.map, color: Colors.blue, size: 20),
+                        const Icon(Icons.map, color: Colors.blue, size: 20),
                         const SizedBox(width: 8),
                         Text(
                           '地図ごとのバックアップ',
@@ -580,7 +868,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: Theme.of(context).brightness == Brightness.dark
-                      ? Colors.orange.shade900.withOpacity(0.3)
+                      ? Colors.orange.shade900.withValues(alpha: 0.3)
                       : Colors.orange.shade50,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
@@ -594,7 +882,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.restore, color: Colors.orange, size: 20),
+                        const Icon(
+                          Icons.restore,
+                          color: Colors.orange,
+                          size: 20,
+                        ),
                         const SizedBox(width: 8),
                         Text(
                           '復元',
@@ -622,8 +914,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Icon(Icons.restore),
                         label: Text(_isRestoring ? '復元中...' : '全体バックアップから復元'),
@@ -642,12 +935,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Icon(Icons.map),
-                        label:
-                            Text(_isMapRestoring ? '復元中...' : '地図バックアップから復元'),
+                        label: Text(
+                          _isMapRestoring ? '復元中...' : '地図バックアップから復元',
+                        ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.orange.shade600,
                           foregroundColor: Colors.white,
@@ -671,6 +966,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _showAISettings() {
+    if (!FeatureFlags.aiEnabled) {
+      showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          icon: const Icon(Icons.smart_toy_outlined),
+          title: const Text('AI機能は準備中です'),
+          content: const Text(
+            '公開版では安全なバックエンドへ移行するまでAI機能を無効にしています。'
+            '画像・音声・メモ本文が外部のAIサービスへ送信されることはありません。',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('閉じる'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -679,10 +994,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              'Gemini AI機能を使用するには、Google AI StudioでAPIキーを取得し、'
-              'lib/utils/ai_service.dartファイルの_apiKeyを設定してください。',
+              'AI機能を利用すると、選択した画像・音声・メモ本文がAIサービスへ送信されます。'
+              '個人情報や機密情報を含むデータは送信しないでください。',
               style: TextStyle(fontSize: 14),
             ),
+            if (kIsWeb) ...[
+              const SizedBox(height: 12),
+              const Text(
+                '公開Web版ではAPIキー漏えい防止のためAI機能を無効化しています。',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(12),
@@ -701,7 +1023,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'APIキーの取得方法:',
+                    '公開版での安全な構成:',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       color: Theme.of(context).textTheme.bodyLarge?.color,
@@ -709,11 +1031,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '1. aistudio.google.com にアクセス\n'
-                    '2. Googleアカウントでログイン\n'
-                    '3. "Get API key"をクリック\n'
-                    '4. 新しいAPIキーを作成\n'
-                    '5. コピーしたキーをコードに設定',
+                    'APIキーをアプリへ直接埋め込まず、認証・レート制限・App Checkを備えた'
+                    'バックエンド経由でAI APIを呼び出してください。',
                     style: TextStyle(
                       fontSize: 12,
                       color: Theme.of(context).textTheme.bodyMedium?.color,
@@ -726,8 +1045,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         AIService.isConfigured
                             ? Icons.check_circle
                             : Icons.error,
-                        color:
-                            AIService.isConfigured ? Colors.green : Colors.red,
+                        color: AIService.isConfigured
+                            ? Colors.green
+                            : Colors.red,
                         size: 16,
                       ),
                       const SizedBox(width: 8),
@@ -756,18 +1076,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed:
-                            _isTestingConnection ? null : _testApiConnection,
+                        onPressed: _isTestingConnection
+                            ? null
+                            : _testApiConnection,
                         icon: _isTestingConnection
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Icon(Icons.wifi_tethering),
                         label: Text(
-                            _isTestingConnection ? 'テスト中...' : 'API接続をテスト'),
+                          _isTestingConnection ? 'テスト中...' : 'API接続をテスト',
+                        ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.blue,
                           foregroundColor: Colors.white,
@@ -796,9 +1119,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     try {
-      print('Settings Debug: API接続テスト開始');
+      appLog('Settings Debug: API接続テスト開始');
       final isConnected = await AIService.testApiConnection();
-      print('Settings Debug: API接続テスト結果: $isConnected');
+      appLog('Settings Debug: API接続テスト結果: $isConnected');
 
       if (mounted) {
         showDialog(
@@ -809,21 +1132,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(isConnected
-                    ? 'AIサービスに正常に接続できました。画像分析機能が利用可能です。'
-                    : 'AIサービスへの接続に失敗しました。\n\n'
-                        '考えられる原因:\n'
-                        '• APIキーが無効または期限切れ\n'
-                        '• ネットワーク接続の問題\n'
-                        '• サーバーが一時的に利用不可\n\n'
-                        'しばらく時間をおいてから再試行してください。'),
+                Text(
+                  isConnected
+                      ? 'AIサービスに正常に接続できました。画像分析機能が利用可能です。'
+                      : 'AIサービスへの接続に失敗しました。\n\n'
+                            '考えられる原因:\n'
+                            '• APIキーが無効または期限切れ\n'
+                            '• ネットワーク接続の問題\n'
+                            '• サーバーが一時的に利用不可\n\n'
+                            'しばらく時間をおいてから再試行してください。',
+                ),
                 if (!isConnected) ...[
                   const SizedBox(height: 16),
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.orange.shade900.withOpacity(0.3)
+                          ? Colors.orange.shade900.withValues(alpha: 0.3)
                           : Colors.orange.shade50,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
@@ -846,37 +1171,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Text(
                           '• プラットフォーム: ${Theme.of(context).platform}',
                           style: TextStyle(
-                            color:
-                                Theme.of(context).textTheme.bodyMedium?.color,
+                            color: Theme.of(
+                              context,
+                            ).textTheme.bodyMedium?.color,
                           ),
                         ),
                         Text(
-                          '• Web環境: ${kIsWeb}',
+                          '• Web環境: $kIsWeb',
                           style: TextStyle(
-                            color:
-                                Theme.of(context).textTheme.bodyMedium?.color,
+                            color: Theme.of(
+                              context,
+                            ).textTheme.bodyMedium?.color,
                           ),
                         ),
                         Text(
                           '• APIキー設定: ${AIService.isConfigured}',
                           style: TextStyle(
-                            color:
-                                Theme.of(context).textTheme.bodyMedium?.color,
+                            color: Theme.of(
+                              context,
+                            ).textTheme.bodyMedium?.color,
                           ),
                         ),
                         if (kIsWeb) ...[
                           Text(
                             '• 現在のURL: ${Uri.base}',
                             style: TextStyle(
-                              color:
-                                  Theme.of(context).textTheme.bodyMedium?.color,
+                              color: Theme.of(
+                                context,
+                              ).textTheme.bodyMedium?.color,
                             ),
                           ),
                           Text(
                             '• HTTPS接続: ${Uri.base.scheme == 'https'}',
                             style: TextStyle(
-                              color:
-                                  Theme.of(context).textTheme.bodyMedium?.color,
+                              color: Theme.of(
+                                context,
+                              ).textTheme.bodyMedium?.color,
                             ),
                           ),
                         ],
@@ -896,7 +1226,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     } catch (e) {
-      print('Settings Debug: API接続テストエラー: $e');
+      appLog('Settings Debug: API接続テストエラー: $e');
       if (mounted) {
         showDialog(
           context: context,
@@ -906,14 +1236,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('API接続テスト中にエラーが発生しました:\n\n$e\n\n'
-                    'APIキーの設定とネットワーク接続を確認してください。'),
+                const Text(
+                  'API接続テスト中にエラーが発生しました。\n\n'
+                  '安全なバックエンド設定とネットワーク接続を確認してください。',
+                ),
                 const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: Theme.of(context).brightness == Brightness.dark
-                        ? Colors.red.shade900.withOpacity(0.3)
+                        ? Colors.red.shade900.withValues(alpha: 0.3)
                         : Colors.red.shade50,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
@@ -946,7 +1278,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                       Text(
-                        '• Web環境: ${kIsWeb}',
+                        '• Web環境: $kIsWeb',
                         style: TextStyle(
                           color: Theme.of(context).textTheme.bodyMedium?.color,
                         ),
@@ -961,15 +1293,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Text(
                           '• 現在のURL: ${Uri.base}',
                           style: TextStyle(
-                            color:
-                                Theme.of(context).textTheme.bodyMedium?.color,
+                            color: Theme.of(
+                              context,
+                            ).textTheme.bodyMedium?.color,
                           ),
                         ),
                         Text(
                           '• HTTPS接続: ${Uri.base.scheme == 'https'}',
                           style: TextStyle(
-                            color:
-                                Theme.of(context).textTheme.bodyMedium?.color,
+                            color: Theme.of(
+                              context,
+                            ).textTheme.bodyMedium?.color,
                           ),
                         ),
                       ],
@@ -1015,7 +1349,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: Theme.of(context).brightness == Brightness.dark
-                    ? Colors.blue.shade900.withOpacity(0.3)
+                    ? Colors.blue.shade900.withValues(alpha: 0.3)
                     : Colors.blue.shade50,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
@@ -1053,7 +1387,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: Theme.of(context).brightness == Brightness.dark
-                    ? Colors.green.shade900.withOpacity(0.3)
+                    ? Colors.green.shade900.withValues(alpha: 0.3)
                     : Colors.green.shade50,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
@@ -1105,6 +1439,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Future<void> _showDiagnosticLogs() async {
+    final entries = await DiagnosticLogStore.instance.readAll();
+    if (!mounted) return;
+    final text = entries.isEmpty
+        ? '診断ログはありません。'
+        : entries
+              .map((entry) {
+                final time = entry.occurredAt.toLocal().toIso8601String();
+                final type = entry.errorType == null
+                    ? ''
+                    : ' / ${entry.errorType}';
+                return '$time / ${entry.event}$type';
+              })
+              .join('\n');
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('端末内診断ログ'),
+        content: SizedBox(
+          width: 520,
+          child: SingleChildScrollView(child: SelectableText(text)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: entries.isEmpty
+                ? null
+                : () async {
+                    await DiagnosticLogStore.instance.clear();
+                    if (dialogContext.mounted) Navigator.pop(dialogContext);
+                  },
+            child: const Text('消去'),
+          ),
+          TextButton(
+            onPressed: entries.isEmpty
+                ? null
+                : () async {
+                    await Clipboard.setData(ClipboardData(text: text));
+                    if (!dialogContext.mounted) return;
+                    ScaffoldMessenger.of(dialogContext).showSnackBar(
+                      const SnackBar(content: Text('診断ログをコピーしました。')),
+                    );
+                  },
+            child: const Text('コピー'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('閉じる'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _openContactForm() async {
     final Uri formUri = Uri.parse(
       'https://docs.google.com/forms/d/e/1FAIpQLSdXoVEFSNiFam-GKOVesRgyW4OM0O0cjLGeJzySjX09bp-juw/viewform?usp=header',
@@ -1113,15 +1500,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       if (await canLaunchUrl(formUri)) {
         await launchUrl(formUri, mode: LaunchMode.externalApplication);
+        if (!mounted) return;
         Navigator.pop(context); // ダイアログを閉じる
       } else {
         await launchUrl(formUri, mode: LaunchMode.platformDefault);
       }
     } catch (e) {
+      appLog('Failed to open contact form: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('お問い合わせフォームを開けませんでした。'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _openExternalPage(String url, String label) async {
+    final uri = Uri.parse(url);
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: kIsWeb
+            ? LaunchMode.platformDefault
+            : LaunchMode.externalApplication,
+      );
+      if (!launched) {
+        throw StateError('launch failed');
+      }
+    } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('お問い合わせフォームを開けませんでした: $e'),
+            content: Text('$labelを開けませんでした。'),
             backgroundColor: Colors.red,
           ),
         );
@@ -1132,7 +1545,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _showDefaultValuesDialog() {
     showDialog(
       context: context,
-      builder: (context) => DefaultValuesDialog(),
+      builder: (context) => const DefaultValuesDialog(),
     );
   }
 
@@ -1140,217 +1553,353 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final offlineModeProvider = context.watch<OfflineModeProvider>();
     final isOfflineMode = offlineModeProvider.isOfflineMode;
-    final currentUser = FirebaseAuth.instance.currentUser;
+    final currentUser = FirebaseAvailability.isReady
+        ? FirebaseAuth.instance.currentUser
+        : null;
+    const aiStatusText = '公開版では安全なバックエンド移行まで無効';
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('設定'),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16.0),
-        children: [
-          // アプリ設定セクション
-          _buildSectionHeader('⚙️ アプリ設定', Icons.settings),
-          const SizedBox(height: 8),
-          Consumer<ThemeProvider>(
-            builder: (context, themeProvider, child) {
-              return Card(
-                elevation: 2,
-                child: ListTile(
-                  leading: Icon(Icons.dark_mode, color: Colors.indigo.shade600),
-                  title: const Text('ダークモード'),
-                  subtitle: const Text('ダークテーマを有効/無効にします'),
-                  trailing: Switch(
-                    value: themeProvider.isDarkMode,
-                    onChanged: (value) {
-                      themeProvider.setDarkMode(value);
+      appBar: AppBar(title: const Text('設定')),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: ListView(
+            padding: const EdgeInsets.all(16.0),
+            children: [
+              // アプリ設定セクション
+              _buildSectionHeader('⚙️ アプリ設定', Icons.settings),
+              const SizedBox(height: 8),
+              Consumer<ThemeProvider>(
+                builder: (context, themeProvider, child) {
+                  return Card(
+                    elevation: 2,
+                    child: ListTile(
+                      leading: Icon(
+                        Icons.dark_mode,
+                        color: Colors.indigo.shade600,
+                      ),
+                      title: const Text('表示テーマ'),
+                      subtitle: Text(switch (themeProvider.themeMode) {
+                        ThemeMode.system => '端末の設定に合わせる',
+                        ThemeMode.light => 'ライト',
+                        ThemeMode.dark => 'ダーク',
+                      }),
+                      trailing: PopupMenuButton<ThemeMode>(
+                        tooltip: '表示テーマを選択',
+                        initialValue: themeProvider.themeMode,
+                        onSelected: themeProvider.setThemeMode,
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(
+                            value: ThemeMode.system,
+                            child: Text('端末の設定に合わせる'),
+                          ),
+                          PopupMenuItem(
+                            value: ThemeMode.light,
+                            child: Text('ライト'),
+                          ),
+                          PopupMenuItem(
+                            value: ThemeMode.dark,
+                            child: Text('ダーク'),
+                          ),
+                        ],
+                        icon: const Icon(Icons.arrow_drop_down),
+                      ),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
+              if (currentUser != null && !isOfflineMode) ...[
+                Card(
+                  elevation: 2,
+                  child: ListTile(
+                    leading: Icon(
+                      Icons.person,
+                      color: Colors.blueGrey.shade600,
+                    ),
+                    title: const Text('プロフィール'),
+                    subtitle: Text(_buildAccountSummary(currentUser)),
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                    onTap: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const ProfileScreen(),
+                        ),
+                      );
+                      final refreshedUser = FirebaseAvailability.isReady
+                          ? FirebaseAuth.instance.currentUser
+                          : null;
+                      if (refreshedUser != null) {
+                        await refreshedUser.reload();
+                      }
+                      if (!mounted) {
+                        return;
+                      }
+                      setState(() {});
                     },
                   ),
                 ),
-              );
-            },
-          ),
-          const SizedBox(height: 8),
-          if (currentUser != null && !isOfflineMode) ...[
-            Card(
-              elevation: 2,
-              child: ListTile(
-                leading: Icon(Icons.person, color: Colors.blueGrey.shade600),
-                title: const Text('プロフィール'),
-                subtitle: Text(_buildAccountSummary(currentUser)),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                onTap: () async {
-                  await Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const ProfileScreen()),
-                  );
-                  final refreshedUser = FirebaseAuth.instance.currentUser;
-                  if (refreshedUser != null) {
-                    await refreshedUser.reload();
-                  }
-                  if (!mounted) {
-                    return;
-                  }
-                  setState(() {});
-                },
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-          Card(
-            elevation: 2,
-            child: ListTile(
-              leading: const Icon(Icons.logout, color: Colors.redAccent),
-              title: const Text('ログアウト'),
-              subtitle: Text(_currentUserSubtitle()),
-              trailing: _isSigningOut
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.arrow_forward_ios, size: 16),
-              enabled:
-                  !_isSigningOut && FirebaseAuth.instance.currentUser != null,
-              onTap: FirebaseAuth.instance.currentUser == null || _isSigningOut
-                  ? null
-                  : _signOut,
-            ),
-          ),
-          if (isOfflineMode) ...[
-            Card(
-              elevation: 2,
-              child: ListTile(
-                leading:
-                    const Icon(Icons.cloud_off, color: Colors.orangeAccent),
-                title: const Text('オフラインモードで利用中'),
-                subtitle: const Text('オンライン機能を利用するにはログインしてください'),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                onTap: () async {
-                  await offlineModeProvider.disableOfflineMode();
-                  if (!mounted) {
-                    return;
-                  }
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const AuthScreen()),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-          Card(
-            elevation: 2,
-            child: ListTile(
-              leading: Icon(Icons.smart_toy, color: Colors.blue.shade600),
-              title: const Text('AI機能設定'),
-              subtitle: Text(AIService.isConfigured
-                  ? 'AIサービス利用可能'
-                  : 'Gemini APIキーを設定してください'),
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-              onTap: _showAISettings,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            elevation: 2,
-            child: ListTile(
-              leading: Icon(Icons.settings, color: Colors.deepPurple.shade600),
-              title: const Text('デフォルト値設定'),
-              subtitle: const Text('発見者・標本番号・カテゴリ・備考の初期値を設定'),
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-              onTap: _showDefaultValuesDialog,
-            ),
-          ),
-
-          const SizedBox(height: 24),
-
-          // データ管理セクション
-          _buildSectionHeader('💾 データ管理', Icons.storage),
-          const SizedBox(height: 8),
-          Card(
-            elevation: 2,
-            child: ListTile(
-              leading: Icon(Icons.backup, color: Colors.green.shade600),
-              title: const Text('バックアップ・復元'),
-              subtitle: Text(_backupInfo != null
-                  ? 'データ: 地図${_backupInfo!.totalMaps}件・メモ${_backupInfo!.totalMemos}件'
-                  : 'データをバックアップ・復元します'),
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-              onTap: _showBackupDialog,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            elevation: 2,
-            child: ListTile(
-              leading: Icon(Icons.map, color: Colors.orange.shade600),
-              title: const Text('カスタム地図管理'),
-              subtitle: const Text('保存された地図の管理と削除'),
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (context) => const MapListScreen()),
-                );
-              },
-            ),
-          ),
-
-          const SizedBox(height: 24),
-
-          // ヘルプ・サポートセクション
-          _buildSectionHeader('❓ ヘルプ・サポート', Icons.help_outline),
-          const SizedBox(height: 8),
-          Card(
-            elevation: 2,
-            child: ListTile(
-              leading: Icon(Icons.school, color: Colors.purple.shade600),
-              title: const Text('チュートリアル'),
-              subtitle: const Text('アプリの使い方を確認します'),
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const TutorialScreen(),
+                const SizedBox(height: 8),
+              ],
+              if (currentUser == null)
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.cloud_outlined),
+                    title: const Text('クラウドへログイン'),
+                    subtitle: Text(
+                      FirebaseAvailability.isReady
+                          ? '共有と自動同期を利用する時だけログインします'
+                          : '現在クラウドへ接続できません',
+                    ),
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                    enabled: FirebaseAvailability.isReady,
+                    onTap: !FirebaseAvailability.isReady
+                        ? null
+                        : () async {
+                            await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const AuthScreen(),
+                              ),
+                            );
+                            if (mounted) setState(() {});
+                          },
                   ),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            elevation: 2,
-            child: ListTile(
-              leading: Icon(Icons.feedback, color: Colors.teal.shade600),
-              title: const Text('お問い合わせ'),
-              subtitle: const Text('ご意見・ご質問・バグ報告（Google Form）'),
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-              onTap: _showContactDialog,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            elevation: 2,
-            child: ListTile(
-              leading: Icon(Icons.info, color: Colors.grey.shade600),
-              title: const Text('このアプリについて'),
-              subtitle: Text('${AppInfo.version}'),
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const AboutAppScreen(),
+                )
+              else
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.logout, color: Colors.redAccent),
+                    title: const Text('ログアウト'),
+                    subtitle: Text(_currentUserSubtitle()),
+                    trailing: _isSigningOut
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.arrow_forward_ios, size: 16),
+                    enabled: !_isSigningOut,
+                    onTap: _isSigningOut ? null : _signOut,
                   ),
-                );
-              },
-            ),
-          ),
+                ),
+              if (currentUser != null && !isOfflineMode) ...[
+                const SizedBox(height: 8),
+                Card(
+                  elevation: 2,
+                  child: ListTile(
+                    leading: const Icon(
+                      Icons.delete_forever,
+                      color: Colors.red,
+                    ),
+                    title: const Text('アカウントを削除'),
+                    subtitle: const Text('アカウントとクラウドデータを削除（端末内の記録は保持）'),
+                    trailing: _isDeletingAccount
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.arrow_forward_ios, size: 16),
+                    enabled: !_isDeletingAccount && !_isSigningOut,
+                    onTap: _isDeletingAccount || _isSigningOut
+                        ? null
+                        : _deleteAccount,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 8),
+              Card(
+                child: SwitchListTile(
+                  secondary: const Icon(Icons.bug_report_outlined),
+                  title: const Text('匿名の障害情報を送信'),
+                  subtitle: const Text(
+                    kIsWeb
+                        ? 'Web版は外部へ送信せず、端末内にのみ記録します'
+                        : '本文・位置・メール・ファイル名は送信しません',
+                  ),
+                  value: !kIsWeb && _crashReportingEnabled,
+                  onChanged: kIsWeb
+                      ? null
+                      : (value) async {
+                          await CrashReportingService.instance.setEnabled(
+                            value,
+                          );
+                          if (mounted) {
+                            setState(() => _crashReportingEnabled = value);
+                          }
+                        },
+                ),
+              ),
+              Card(
+                elevation: 2,
+                child: ListTile(
+                  leading: Icon(Icons.smart_toy, color: Colors.blue.shade600),
+                  title: const Text('AI機能（準備中）'),
+                  subtitle: const Text(aiStatusText),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: _showAISettings,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Card(
+                elevation: 2,
+                child: ListTile(
+                  leading: Icon(
+                    Icons.privacy_tip,
+                    color: Colors.blueGrey.shade600,
+                  ),
+                  title: const Text('プライバシーポリシー'),
+                  subtitle: const Text('収集する情報・利用目的・削除方法を確認'),
+                  trailing: const Icon(Icons.open_in_new, size: 16),
+                  onTap: () => _openExternalPage(
+                    'https://akiii2024.github.io/location_memo/privacy.html',
+                    'プライバシーポリシー',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Card(
+                elevation: 2,
+                child: ListTile(
+                  leading: Icon(
+                    Icons.settings,
+                    color: Colors.deepPurple.shade600,
+                  ),
+                  title: const Text('デフォルト値設定'),
+                  subtitle: const Text('発見者・標本番号・カテゴリ・備考の初期値を設定'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: _showDefaultValuesDialog,
+                ),
+              ),
 
-          const SizedBox(height: 32),
-        ],
+              const SizedBox(height: 24),
+
+              // データ管理セクション
+              _buildSectionHeader('💾 データ管理', Icons.storage),
+              const SizedBox(height: 8),
+              Card(
+                elevation: 2,
+                child: ListTile(
+                  leading: Icon(Icons.backup, color: Colors.green.shade600),
+                  title: const Text('バックアップ・復元'),
+                  subtitle: Text(
+                    _backupInfo != null
+                        ? 'データ: 地図${_backupInfo!.totalMaps}件・メモ${_backupInfo!.totalMemos}件'
+                        : 'データをバックアップ・復元します',
+                  ),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: _showBackupDialog,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Card(
+                elevation: 2,
+                child: ListTile(
+                  leading: Icon(Icons.map, color: Colors.orange.shade600),
+                  title: const Text('カスタム地図管理'),
+                  subtitle: const Text('保存された地図の管理と削除'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const MapListScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.delete_forever, color: Colors.red),
+                  title: const Text('端末内の全データを削除'),
+                  subtitle: Text(
+                    '地図${_backupInfo?.totalMaps ?? 0}件・メモ${_backupInfo?.totalMemos ?? 0}件を完全に削除',
+                  ),
+                  trailing: _isDeletingLocalData
+                      ? const SizedBox.square(
+                          dimension: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.chevron_right),
+                  enabled: !_isDeletingLocalData,
+                  onTap: _isDeletingLocalData ? null : _deleteLocalData,
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              // ヘルプ・サポートセクション
+              _buildSectionHeader('❓ ヘルプ・サポート', Icons.help_outline),
+              const SizedBox(height: 8),
+              Card(
+                elevation: 2,
+                child: ListTile(
+                  leading: Icon(Icons.school, color: Colors.purple.shade600),
+                  title: const Text('チュートリアル'),
+                  subtitle: const Text('アプリの使い方を確認します'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const TutorialScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+              Card(
+                elevation: 2,
+                child: ListTile(
+                  leading: Icon(Icons.feedback, color: Colors.teal.shade600),
+                  title: const Text('お問い合わせ'),
+                  subtitle: const Text('ご意見・ご質問・バグ報告（Google Form）'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: _showContactDialog,
+                ),
+              ),
+              if (kIsWeb) ...[
+                const SizedBox(height: 8),
+                Card(
+                  elevation: 2,
+                  child: ListTile(
+                    leading: Icon(
+                      Icons.bug_report_outlined,
+                      color: Colors.orange.shade700,
+                    ),
+                    title: const Text('端末内診断ログ'),
+                    subtitle: const Text('匿名化した障害情報を確認・コピー・消去'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: _showDiagnosticLogs,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 8),
+              Card(
+                elevation: 2,
+                child: ListTile(
+                  leading: Icon(Icons.info, color: Colors.grey.shade600),
+                  title: const Text('このアプリについて'),
+                  subtitle: Text(AppInfo.version),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const AboutAppScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ),
+
+              const SizedBox(height: 32),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1360,11 +1909,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
       child: Row(
         children: [
-          Icon(
-            icon,
-            size: 20,
-            color: Colors.grey.shade600,
-          ),
+          Icon(icon, size: 20, color: Colors.grey.shade600),
           const SizedBox(width: 8),
           Text(
             title,
@@ -1381,8 +1926,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 }
 
 class DefaultValuesDialog extends StatefulWidget {
+  const DefaultValuesDialog({super.key});
+
   @override
-  _DefaultValuesDialogState createState() => _DefaultValuesDialogState();
+  State<DefaultValuesDialog> createState() => _DefaultValuesDialogState();
 }
 
 class _DefaultValuesDialogState extends State<DefaultValuesDialog> {
@@ -1463,11 +2010,11 @@ class _DefaultValuesDialogState extends State<DefaultValuesDialog> {
         );
         Navigator.pop(context);
       }
-    } catch (e) {
+    } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('保存に失敗しました: $e'),
+          const SnackBar(
+            content: Text('保存できませんでした。再試行してください。'),
             backgroundColor: Colors.red,
           ),
         );
@@ -1526,11 +2073,11 @@ class _DefaultValuesDialogState extends State<DefaultValuesDialog> {
             ),
           );
         }
-      } catch (e) {
+      } catch (_) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('クリアに失敗しました: $e'),
+            const SnackBar(
+              content: Text('クリアできませんでした。再試行してください。'),
               backgroundColor: Colors.red,
             ),
           );
@@ -1584,7 +2131,7 @@ class _DefaultValuesDialogState extends State<DefaultValuesDialog> {
                   const SizedBox(height: 12),
                   // カテゴリ
                   DropdownButtonFormField<String>(
-                    value: _selectedCategory,
+                    initialValue: _selectedCategory,
                     decoration: const InputDecoration(
                       labelText: 'カテゴリ',
                       border: OutlineInputBorder(),
@@ -1617,7 +2164,7 @@ class _DefaultValuesDialogState extends State<DefaultValuesDialog> {
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.blue.shade900.withOpacity(0.3)
+                          ? Colors.blue.shade900.withValues(alpha: 0.3)
                           : Colors.blue.shade50,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
@@ -1644,8 +2191,9 @@ class _DefaultValuesDialogState extends State<DefaultValuesDialog> {
                           '• 備考: 新しいメモの「備考」フィールドに自動入力',
                           style: TextStyle(
                             fontSize: 12,
-                            color:
-                                Theme.of(context).textTheme.bodyMedium?.color,
+                            color: Theme.of(
+                              context,
+                            ).textTheme.bodyMedium?.color,
                           ),
                         ),
                       ],

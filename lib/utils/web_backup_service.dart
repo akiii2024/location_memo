@@ -1,6 +1,9 @@
+// ignore_for_file: deprecated_member_use, avoid_web_libraries_in_flutter
+// Flutter 3.35の正式対象であるJavaScriptビルド専用の条件付き実装。
+
+import 'app_logger.dart';
 import 'dart:html' as html;
 import 'dart:convert';
-import 'dart:typed_data';
 
 /// Web環境でのバックアップサービス
 class WebBackupService {
@@ -29,9 +32,9 @@ class WebBackupService {
       // メモリリークを防ぐためURLオブジェクトを解放
       html.Url.revokeObjectUrl(url);
 
-      print('ファイル「$fileName」のダウンロードを開始しました');
+      appLog('ファイル「$fileName」のダウンロードを開始しました');
     } catch (e) {
-      print('ダウンロードエラー: $e');
+      appLog('ダウンロードエラー: $e');
       // フォールバック: データURIを使用
       _fallbackDataUriDownload(content, fileName);
     }
@@ -54,14 +57,14 @@ class WebBackupService {
       anchor.click();
       anchor.remove();
 
-      print('データURIを使用してファイル「$fileName」のダウンロードを開始しました');
+      appLog('データURIを使用してファイル「$fileName」のダウンロードを開始しました');
     } catch (e) {
-      print('フォールバックダウンロードもエラー: $e');
+      appLog('フォールバックダウンロードもエラー: $e');
       // 最終フォールバック: コンソール出力
-      print('=== バックアップファイル「$fileName」の内容 ===');
-      print('以下のJSONデータをコピーして手動で保存してください：');
-      print(content);
-      print('=== バックアップファイル終了 ===');
+      appLog('=== バックアップファイル「$fileName」の内容 ===');
+      appLog('以下のJSONデータをコピーして手動で保存してください：');
+      appLog(content);
+      appLog('=== バックアップファイル終了 ===');
     }
   }
 }

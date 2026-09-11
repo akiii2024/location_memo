@@ -1,24 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:location_memo/screens/auth_screen.dart';
 import 'package:location_memo/screens/main_screen.dart';
 import 'package:location_memo/screens/tutorial_screen.dart';
 import 'package:location_memo/utils/app_info.dart';
+import 'package:location_memo/utils/app_bootstrap.dart';
 import 'package:location_memo/utils/tutorial_service.dart';
-import 'package:location_memo/utils/offline_mode_provider.dart';
 
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({Key? key}) : super(key: key);
+  const SplashScreen({super.key});
 
   @override
-  _SplashScreenState createState() => _SplashScreenState();
+  State<SplashScreen> createState() => _SplashScreenState();
 }
 
 class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
+  bool _isRouting = false;
 
   @override
   void initState() {
@@ -27,43 +26,24 @@ class _SplashScreenState extends State<SplashScreen>
       duration: const Duration(milliseconds: 1500),
       vsync: this,
     );
-    _fadeAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeIn,
-    ));
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
+    );
 
     _animationController.forward();
+  }
 
-    Future.delayed(const Duration(seconds: 3), () async {
-      if (!mounted) {
-        return;
-      }
-
-      final offlineModeProvider = context.read<OfflineModeProvider>();
-      await offlineModeProvider.ensureInitialized();
-
-      final isFirstLaunch = await TutorialService.isFirstLaunch();
-      final user = FirebaseAuth.instance.currentUser;
-      if (!mounted) {
-        return;
-      }
-
-      Widget nextScreen;
-      if (isFirstLaunch) {
-        nextScreen = const TutorialScreen();
-      } else if (user == null && !offlineModeProvider.isOfflineMode) {
-        nextScreen = const AuthScreen();
-      } else {
-        nextScreen = const MainScreen();
-      }
-
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => nextScreen),
-      );
-    });
+  Future<void> _routeIntoApp() async {
+    if (_isRouting) return;
+    _isRouting = true;
+    final isFirstLaunch = await TutorialService.isFirstLaunch();
+    if (!mounted) return;
+    final nextScreen = isFirstLaunch
+        ? const TutorialScreen()
+        : const MainScreen();
+    await Navigator.of(
+      context,
+    ).pushReplacement(MaterialPageRoute(builder: (_) => nextScreen));
   }
 
   @override
@@ -74,6 +54,11 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   Widget build(BuildContext context) {
+    final bootstrap = context.watch<AppBootstrapController>();
+    if (bootstrap.canEnterApp) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _routeIntoApp());
+    }
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Center(
@@ -89,7 +74,7 @@ class _SplashScreenState extends State<SplashScreen>
                   borderRadius: BorderRadius.circular(20),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
+                      color: Colors.black.withValues(alpha: 0.2),
                       spreadRadius: 2,
                       blurRadius: 10,
                       offset: const Offset(0, 5),
@@ -108,7 +93,7 @@ class _SplashScreenState extends State<SplashScreen>
               ),
               const SizedBox(height: 30),
               Text(
-                'Location Memo',
+                '位置メモ',
                 style: TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.bold,
@@ -129,25 +114,33 @@ class _SplashScreenState extends State<SplashScreen>
                 'Powered by Flutter',
                 style: TextStyle(
                   fontSize: 12,
-                  color: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.color
-                      ?.withOpacity(0.7),
+                  color: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
                   fontFamily: 'NotoSansJP',
                 ),
               ),
               const SizedBox(height: 50),
-              SizedBox(
-                width: 30,
-                height: 30,
-                child: CircularProgressIndicator(
-                  strokeWidth: 3,
-                  valueColor: AlwaysStoppedAnimation<Color>(
-                    Colors.blue[600] ?? Colors.blue,
+              if (bootstrap.state == AppBootstrapState.failed) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Text(
+                    bootstrap.failure?.userMessage ?? 'アプリを起動できませんでした。',
+                    textAlign: TextAlign.center,
                   ),
                 ),
-              ),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: bootstrap.initialize,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('再試行'),
+                ),
+              ] else
+                const SizedBox(
+                  width: 30,
+                  height: 30,
+                  child: CircularProgressIndicator(strokeWidth: 3),
+                ),
             ],
           ),
         ),

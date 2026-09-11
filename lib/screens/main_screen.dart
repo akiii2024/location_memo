@@ -5,12 +5,15 @@ import 'package:location_memo/screens/home_screen.dart';
 import 'package:location_memo/screens/search_screen.dart';
 import 'package:location_memo/screens/pin_list_screen.dart';
 import 'package:location_memo/screens/settings_screen.dart';
+import 'package:location_memo/utils/app_bootstrap.dart';
+import 'package:location_memo/utils/theme_provider.dart';
+import 'package:provider/provider.dart';
 
 class MainScreen extends StatefulWidget {
-  const MainScreen({Key? key}) : super(key: key);
+  const MainScreen({super.key});
 
   @override
-  _MainScreenState createState() => _MainScreenState();
+  State<MainScreen> createState() => _MainScreenState();
 }
 
 class _MainScreenState extends State<MainScreen> {
@@ -37,10 +40,13 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _checkAndShowAlphaWarningDialog() async {
+    if (kReleaseMode) {
+      return;
+    }
     final prefs = await SharedPreferences.getInstance();
     final shouldShowDialog = prefs.getBool('show_alpha_warning') ?? true;
 
-    if (shouldShowDialog) {
+    if (shouldShowDialog && mounted) {
       _showAlphaWarningDialog();
     }
   }
@@ -55,7 +61,7 @@ class _MainScreenState extends State<MainScreen> {
         return StatefulBuilder(
           builder: (context, setState) {
             return AlertDialog(
-              title: Row(
+              title: const Row(
                 children: [
                   Icon(Icons.warning, color: Colors.orange),
                   SizedBox(width: 8),
@@ -66,28 +72,28 @@ class _MainScreenState extends State<MainScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  const Text(
                     'このアプリは現在開発中のテスト版です。',
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
-                  SizedBox(height: 8),
-                  Text(
+                  const SizedBox(height: 8),
+                  const Text(
                     '以下の点にご注意ください：',
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
-                  SizedBox(height: 4),
-                  Text('• 保存したデータが消える可能性があります'),
-                  Text('• アプリが予期せず停止する可能性があります'),
-                  Text('• 機能が変更・削除される可能性があります'),
-                  SizedBox(height: 8),
-                  Text(
+                  const SizedBox(height: 4),
+                  const Text('• 保存したデータが消える可能性があります'),
+                  const Text('• アプリが予期せず停止する可能性があります'),
+                  const Text('• 機能が変更・削除される可能性があります'),
+                  const SizedBox(height: 8),
+                  const Text(
                     '重要なデータは必ずバックアップを取ってからご利用ください。',
                     style: TextStyle(
                       color: Colors.red,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   Row(
                     children: [
                       Checkbox(
@@ -98,7 +104,7 @@ class _MainScreenState extends State<MainScreen> {
                           });
                         },
                       ),
-                      Expanded(
+                      const Expanded(
                         child: Text(
                           '次回から表示しない',
                           style: TextStyle(fontSize: 14),
@@ -114,10 +120,10 @@ class _MainScreenState extends State<MainScreen> {
                     // 設定を保存
                     final prefs = await SharedPreferences.getInstance();
                     await prefs.setBool('show_alpha_warning', !dontShowAgain);
-
+                    if (!context.mounted) return;
                     Navigator.of(context).pop();
                   },
-                  child: Text(
+                  child: const Text(
                     '理解しました',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
@@ -135,65 +141,149 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: _screens[_currentIndex],
-      bottomNavigationBar: SafeArea(
-        // PWA環境でのタッチ反応問題を解決するため、パディング計算を簡素化
-        minimum: EdgeInsets.only(
-          bottom: kIsWeb ? 4.0 : 0.0, // Web環境では最小限のパディング
-        ),
-        child: Container(
-          decoration: BoxDecoration(
-            color: Theme.of(context).bottomNavigationBarTheme.backgroundColor,
-            boxShadow: [
-              BoxShadow(
-                color: Theme.of(context).brightness == Brightness.dark
-                    ? Colors.black.withOpacity(0.3)
-                    : Colors.black.withOpacity(0.1),
-                spreadRadius: 0,
-                blurRadius: 4,
-                offset: const Offset(0, -2),
-              ),
-            ],
+    final isWide =
+        MediaQuery.sizeOf(context).width >= AppSpacing.navigationRailBreakpoint;
+    final bootstrap = context.watch<AppBootstrapController>();
+    final body = Column(
+      children: [
+        if (bootstrap.state == AppBootstrapState.localOnly)
+          _CloudUnavailableBanner(
+            message:
+                bootstrap.failure?.userMessage ?? 'クラウドへ接続できません。端末内の記録は利用できます。',
+            isRetrying: bootstrap.state == AppBootstrapState.loading,
+            onRetry: bootstrap.retryFirebase,
           ),
-          child: BottomNavigationBar(
-            type: BottomNavigationBarType.fixed,
-            currentIndex: _currentIndex,
-            onTap: (index) {
-              setState(() {
-                _currentIndex = index;
-              });
-            },
-            // テーマに合わせた設定
-            elevation:
-                Theme.of(context).bottomNavigationBarTheme.elevation ?? 8,
-            backgroundColor:
-                Theme.of(context).bottomNavigationBarTheme.backgroundColor,
-            selectedItemColor:
-                Theme.of(context).bottomNavigationBarTheme.selectedItemColor,
-            unselectedItemColor:
-                Theme.of(context).bottomNavigationBarTheme.unselectedItemColor,
-            // Web環境での高さ調整
-            selectedFontSize: kIsWeb ? 10 : 12,
-            unselectedFontSize: kIsWeb ? 10 : 12,
-            items: const [
-              BottomNavigationBarItem(
-                icon: Icon(Icons.home),
-                label: 'ホーム',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.search),
-                label: '検索',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.push_pin),
-                label: 'ピン一覧',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.settings),
-                label: '設定',
-              ),
-            ],
+        Expanded(
+          child: IndexedStack(index: _currentIndex, children: _screens),
+        ),
+      ],
+    );
+
+    return Scaffold(
+      body: isWide
+          ? Row(
+              children: [
+                SafeArea(
+                  right: false,
+                  child: NavigationRail(
+                    selectedIndex: _currentIndex,
+                    labelType: NavigationRailLabelType.all,
+                    onDestinationSelected: _selectDestination,
+                    destinations: const [
+                      NavigationRailDestination(
+                        icon: Icon(Icons.home_outlined),
+                        selectedIcon: Icon(Icons.home),
+                        label: Text('ホーム'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.search_outlined),
+                        selectedIcon: Icon(Icons.search),
+                        label: Text('検索'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.push_pin_outlined),
+                        selectedIcon: Icon(Icons.push_pin),
+                        label: Text('ピン一覧'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.settings_outlined),
+                        selectedIcon: Icon(Icons.settings),
+                        label: Text('設定'),
+                      ),
+                    ],
+                  ),
+                ),
+                const VerticalDivider(width: 1),
+                Expanded(child: body),
+              ],
+            )
+          : body,
+      bottomNavigationBar: isWide
+          ? null
+          : NavigationBar(
+              selectedIndex: _currentIndex,
+              onDestinationSelected: _selectDestination,
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.home_outlined),
+                  selectedIcon: Icon(Icons.home),
+                  label: 'ホーム',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.search_outlined),
+                  selectedIcon: Icon(Icons.search),
+                  label: '検索',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.push_pin_outlined),
+                  selectedIcon: Icon(Icons.push_pin),
+                  label: 'ピン一覧',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.settings_outlined),
+                  selectedIcon: Icon(Icons.settings),
+                  label: '設定',
+                ),
+              ],
+            ),
+    );
+  }
+
+  void _selectDestination(int index) {
+    if (_currentIndex == index) return;
+    setState(() {
+      _currentIndex = index;
+    });
+  }
+}
+
+class _CloudUnavailableBanner extends StatelessWidget {
+  const _CloudUnavailableBanner({
+    required this.message,
+    required this.isRetrying,
+    required this.onRetry,
+  });
+
+  final String message;
+  final bool isRetrying;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Semantics(
+      liveRegion: true,
+      child: Material(
+        color: colors.tertiaryContainer,
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.cloud_off_outlined,
+                  color: colors.onTertiaryContainer,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    message,
+                    style: TextStyle(color: colors.onTertiaryContainer),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: isRetrying ? null : onRetry,
+                  icon: isRetrying
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh),
+                  label: const Text('再試行'),
+                ),
+              ],
+            ),
           ),
         ),
       ),

@@ -1,30 +1,68 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:location_memo/main.dart';
+import 'package:location_memo/screens/auth_screen.dart';
+import 'package:location_memo/utils/ai_service.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('認証画面から新規登録へ切り替えられる', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: AuthScreen()));
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    expect(find.text('アカウントにログイン'), findsOneWidget);
+    expect(find.text('パスワードを忘れた方'), findsOneWidget);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
+    await tester.ensureVisible(find.text('アカウントをお持ちでない方はこちら'));
+    await tester.tap(find.text('アカウントをお持ちでない方はこちら'));
     await tester.pump();
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(find.text('新しくアカウントを作成'), findsOneWidget);
+    expect(find.text('表示名 (任意)'), findsOneWidget);
+    expect(find.text('パスワード (確認用)'), findsOneWidget);
+  });
+
+  testWidgets('新規登録では8文字未満のパスワードを拒否する', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: AuthScreen()));
+    await tester.ensureVisible(find.text('アカウントをお持ちでない方はこちら'));
+    await tester.tap(find.text('アカウントをお持ちでない方はこちら'));
+    await tester.pump();
+
+    await tester.enterText(
+      find.byType(TextFormField).at(0),
+      'user@example.com',
+    );
+    await tester.enterText(find.byType(TextFormField).at(2), '1234567');
+    await tester.enterText(find.byType(TextFormField).at(3), '1234567');
+    await tester.ensureVisible(find.text('アカウントを作成'));
+    await tester.tap(find.text('アカウントを作成'));
+    await tester.pump();
+
+    expect(find.text('パスワードは8文字以上で設定してください'), findsOneWidget);
+  });
+
+  test('APIキー未指定時はAI機能を無効化する', () {
+    expect(AIService.isConfigured, isFalse);
+  });
+
+  testWidgets('360px幅・200%文字でもログイン画面が操作可能', (tester) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: const AuthScreen(),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('アカウントにログイン'), findsOneWidget);
+    expect(find.widgetWithText(ElevatedButton, 'ログイン'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }

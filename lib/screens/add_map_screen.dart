@@ -3,16 +3,15 @@ import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:convert';
 import '../models/map_info.dart';
 import '../utils/database_helper.dart';
 
 class AddMapScreen extends StatefulWidget {
-  const AddMapScreen({Key? key}) : super(key: key);
+  const AddMapScreen({super.key});
 
   @override
-  _AddMapScreenState createState() => _AddMapScreenState();
+  State<AddMapScreen> createState() => _AddMapScreenState();
 }
 
 class _AddMapScreenState extends State<AddMapScreen> {
@@ -35,6 +34,7 @@ class _AddMapScreenState extends State<AddMapScreen> {
         maxHeight: 1080,
         imageQuality: 85,
       );
+      if (!mounted) return;
 
       if (image != null) {
         if (kIsWeb) {
@@ -48,14 +48,13 @@ class _AddMapScreenState extends State<AddMapScreen> {
           });
         }
       }
-    } catch (e) {
+    } catch (_) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('画像の選択に失敗しました: $e')),
+        const SnackBar(content: Text('画像を選択できませんでした。権限と空き容量を確認してください。')),
       );
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -72,6 +71,7 @@ class _AddMapScreenState extends State<AddMapScreen> {
         maxHeight: 1080,
         imageQuality: 85,
       );
+      if (!mounted) return;
 
       if (image != null) {
         if (kIsWeb) {
@@ -85,29 +85,28 @@ class _AddMapScreenState extends State<AddMapScreen> {
           });
         }
       }
-    } catch (e) {
+    } catch (_) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('写真の撮影に失敗しました: $e')),
+        const SnackBar(content: Text('写真を撮影できませんでした。カメラ権限を確認してください。')),
       );
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _saveMap() async {
     if (_titleController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('地図のタイトルを入力してください')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('地図のタイトルを入力してください')));
       return;
     }
 
     if ((kIsWeb ? _selectedImageBytes == null : _selectedImage == null)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('地図画像を選択してください')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('地図画像を選択してください')));
       return;
     }
 
@@ -129,8 +128,9 @@ class _AddMapScreenState extends State<AddMapScreen> {
         if (_selectedImage != null) {
           final directory = await getApplicationDocumentsDirectory();
           final fileName = 'map_${DateTime.now().millisecondsSinceEpoch}.png';
-          final savedImage =
-              await _selectedImage!.copy('${directory.path}/$fileName');
+          final savedImage = await _selectedImage!.copy(
+            '${directory.path}/$fileName',
+          );
           imagePath = savedImage.path;
         }
       }
@@ -141,6 +141,7 @@ class _AddMapScreenState extends State<AddMapScreen> {
       );
 
       await DatabaseHelper.instance.createMap(mapInfo);
+      if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -150,17 +151,16 @@ class _AddMapScreenState extends State<AddMapScreen> {
       );
 
       Navigator.pop(context, true);
-    } catch (e) {
+    } catch (_) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('保存に失敗しました: $e'),
+        const SnackBar(
+          content: Text('地図を保存できませんでした。空き容量を確認して再試行してください。'),
           backgroundColor: Colors.red,
         ),
       );
     } finally {
-      setState(() {
-        _isSaving = false;
-      });
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -226,14 +226,8 @@ class _AddMapScreenState extends State<AddMapScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: kIsWeb
-                      ? Image.memory(
-                          _selectedImageBytes!,
-                          fit: BoxFit.cover,
-                        )
-                      : Image.file(
-                          _selectedImage!,
-                          fit: BoxFit.cover,
-                        ),
+                      ? Image.memory(_selectedImageBytes!, fit: BoxFit.cover)
+                      : Image.file(_selectedImage!, fit: BoxFit.cover),
                 ),
               ),
               const SizedBox(height: 12),
@@ -279,8 +273,9 @@ class _AddMapScreenState extends State<AddMapScreen> {
                             height: 20,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(Colors.white),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
                             ),
                           ),
                           SizedBox(width: 8),

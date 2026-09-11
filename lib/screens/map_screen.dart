@@ -1,3 +1,4 @@
+import '../utils/app_logger.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -14,6 +15,7 @@ import '../utils/collaboration_metadata_store.dart';
 import '../utils/collaboration_sync_coordinator.dart';
 import '../utils/print_helper.dart';
 import '../utils/ai_service.dart';
+import '../utils/feature_flags.dart';
 import '../widgets/custom_map_widget.dart';
 import 'memo_detail_screen.dart';
 import 'memo_list_screen.dart';
@@ -22,10 +24,10 @@ import 'add_memo_screen.dart';
 class MapScreen extends StatefulWidget {
   final MapInfo? mapInfo;
 
-  const MapScreen({Key? key, this.mapInfo}) : super(key: key);
+  const MapScreen({super.key, this.mapInfo});
 
   @override
-  _MapScreenState createState() => _MapScreenState();
+  State<MapScreen> createState() => _MapScreenState();
 }
 
 class _MapScreenState extends State<MapScreen> {
@@ -40,7 +42,7 @@ class _MapScreenState extends State<MapScreen> {
   bool _isDownloading = false;
   Box? _layerNameBox; // レイヤー名ボックス
   CollaborationMetadata? _collaborationMetadata;
-  StreamSubscription<List<Memo>>? _collaborationSubscription;
+  StreamSubscription<FirebaseMemoChangeSet>? _collaborationSubscription;
   bool _isCollaborationConnecting = false;
   String? _collaborationError;
 
@@ -60,8 +62,9 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _renameCurrentLayer() async {
-    final controller =
-        TextEditingController(text: _layerDisplayName(_currentLayer));
+    final controller = TextEditingController(
+      text: _layerDisplayName(_currentLayer),
+    );
     final newName = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -123,9 +126,7 @@ class _MapScreenState extends State<MapScreen> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Firebaseに保存できる地図が見つかりませんでした'),
-        ),
+        const SnackBar(content: Text('Firebaseに保存できる地図が見つかりませんでした')),
       );
       return;
     }
@@ -142,9 +143,7 @@ class _MapScreenState extends State<MapScreen> {
         showDialog<Widget>(
           context: context,
           barrierDismissible: false,
-          builder: (_) => const Center(
-            child: CircularProgressIndicator(),
-          ),
+          builder: (_) => const Center(child: CircularProgressIndicator()),
         );
       }
 
@@ -153,6 +152,19 @@ class _MapScreenState extends State<MapScreen> {
       if (!mounted) {
         return;
       }
+      if (result.success && targetMap.id != null) {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          await CollaborationSyncCoordinator.instance.registerCollaborativeMap(
+            mapId: targetMap.id!,
+            ownerUid: user.uid,
+            isOwner: true,
+            ownerEmail: user.email,
+            remoteMapId: result.remoteMapId,
+          );
+        }
+      }
+      if (!mounted) return;
 
       if (dialogShown) {
         Navigator.of(context, rootNavigator: true).pop();
@@ -168,16 +180,14 @@ class _MapScreenState extends State<MapScreen> {
           ),
         ),
       );
-    } catch (error) {
+    } catch (_) {
       if (mounted) {
         if (dialogShown) {
           Navigator.of(context, rootNavigator: true).pop();
           dialogShown = false;
         }
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Firebaseアップロード中にエラーが発生しました: $error'),
-          ),
+          const SnackBar(content: Text('クラウドへ保存できませんでした。通信状況を確認してください。')),
         );
       }
     } finally {
@@ -212,10 +222,7 @@ class _MapScreenState extends State<MapScreen> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content:
-              Text('Save the map locally before downloading it from Firebase.'),
-        ),
+        const SnackBar(content: Text('クラウドから取得する前に地図を端末へ保存してください。')),
       );
       return;
     }
@@ -232,14 +239,17 @@ class _MapScreenState extends State<MapScreen> {
         showDialog<Widget>(
           context: context,
           barrierDismissible: false,
-          builder: (_) => const Center(
-            child: CircularProgressIndicator(),
-          ),
+          builder: (_) => const Center(child: CircularProgressIndicator()),
         );
       }
 
-      final result =
-          await FirebaseMapService.instance.downloadMap(currentMapId);
+      final metadata = await CollaborationSyncCoordinator.instance.getMetadata(
+        currentMapId,
+      );
+      final result = await FirebaseMapService.instance.downloadMap(
+        currentMapId,
+        remoteMapId: metadata?.remoteMapId,
+      );
 
       if (!mounted) {
         return;
@@ -261,38 +271,36 @@ class _MapScreenState extends State<MapScreen> {
           }
         }
         if (updatedMap != null) {
+          if (!mounted) return;
           setState(() {
             _customMapPath = updatedMap!.imagePath ?? _customMapPath;
           });
         }
-        if (await CollaborationSyncCoordinator.instance
-            .isCollaborative(currentMapId)) {
-          final currentUser = FirebaseAuth.instance.currentUser;
-          if (currentUser != null) {
-            await CollaborationSyncCoordinator.instance
-                .registerCollaborativeMap(
-              mapId: currentMapId,
-              ownerUid: currentUser.uid,
-              isOwner: true,
-              ownerEmail: currentUser.email,
-            );
-          }
+        final currentUser = FirebaseAuth.instance.currentUser;
+        final localMapId = result.localMapId ?? currentMapId;
+        if (currentUser != null) {
+          await CollaborationSyncCoordinator.instance.registerCollaborativeMap(
+            mapId: localMapId,
+            ownerUid: metadata?.ownerUid ?? currentUser.uid,
+            isOwner: metadata?.isOwner ?? true,
+            ownerEmail: metadata?.ownerEmail ?? currentUser.email,
+            remoteMapId: metadata?.remoteMapId,
+          );
         }
       }
+      if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.message)),
-      );
-    } catch (error) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(result.message)));
+    } catch (_) {
       if (mounted) {
         if (dialogShown) {
           Navigator.of(context, rootNavigator: true).pop();
           dialogShown = false;
         }
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to download map from Firebase: $error'),
-          ),
+          const SnackBar(content: Text('クラウドから地図を取得できませんでした。再試行してください。')),
         );
       }
     } finally {
@@ -347,7 +355,7 @@ class _MapScreenState extends State<MapScreen> {
         }
       }
     } catch (e) {
-      print('地図ファイルの読み込み中にエラーが発生しました: $e');
+      appLog('地図ファイルの読み込み中にエラーが発生しました: $e');
     }
   }
 
@@ -363,8 +371,9 @@ class _MapScreenState extends State<MapScreen> {
       return;
     }
     try {
-      final metadata =
-          await CollaborationMetadataStore.instance.getForMap(mapId);
+      final metadata = await CollaborationMetadataStore.instance.getForMap(
+        mapId,
+      );
       if (!mounted) {
         return;
       }
@@ -378,8 +387,8 @@ class _MapScreenState extends State<MapScreen> {
       }
       await _startCollaborationListener(mapId, metadata);
     } catch (error, stackTrace) {
-      debugPrint('Failed to load collaboration metadata: $error');
-      debugPrintStack(stackTrace: stackTrace);
+      appLog('Failed to load collaboration metadata: $error');
+      appLog('Stack trace', stackTrace);
     }
   }
 
@@ -395,38 +404,32 @@ class _MapScreenState extends State<MapScreen> {
     });
     try {
       _collaborationSubscription = FirebaseMapService.instance
-          .subscribeToMapMemos(mapId: mapId, ownerUid: metadata.ownerUid)
+          .subscribeToMapMemos(
+            mapId: mapId,
+            ownerUid: metadata.ownerUid,
+            remoteMapId: metadata.remoteMapId,
+          )
           .listen(
-        (remoteMemos) {
-          unawaited(DatabaseHelper.instance
-              .replaceMemosForMap(mapId, List<Memo>.from(remoteMemos)));
-          if (!mounted) {
-            return;
-          }
-          setState(() {
-            _collaborationError = null;
-          });
-          unawaited(_loadMemos());
-        },
-        onError: (error, stackTrace) {
-          debugPrint('Collaboration stream error: $error');
-          debugPrintStack(stackTrace: stackTrace);
-          if (!mounted) {
-            return;
-          }
-          setState(() {
-            _collaborationError = 'リアルタイム同期でエラーが発生しました';
-          });
-        },
-      );
+            (changes) => unawaited(_applyRemoteChanges(mapId, changes)),
+            onError: (error, stackTrace) {
+              appLog('Collaboration stream error: $error');
+              appLog('Stack trace', stackTrace);
+              if (!mounted) {
+                return;
+              }
+              setState(() {
+                _collaborationError = 'リアルタイム同期でエラーが発生しました';
+              });
+            },
+          );
     } catch (error, stackTrace) {
-      debugPrint('Failed to start collaboration listener: $error');
-      debugPrintStack(stackTrace: stackTrace);
+      appLog('Failed to start collaboration listener: $error');
+      appLog('Stack trace', stackTrace);
       if (!mounted) {
         return;
       }
       setState(() {
-        _collaborationError = error.toString();
+        _collaborationError = '同期を開始できませんでした。再試行してください。';
       });
     } finally {
       if (mounted) {
@@ -434,6 +437,36 @@ class _MapScreenState extends State<MapScreen> {
           _isCollaborationConnecting = false;
         });
       }
+    }
+  }
+
+  Future<void> _applyRemoteChanges(
+    int mapId,
+    FirebaseMemoChangeSet changes,
+  ) async {
+    try {
+      final pending = await CollaborationSyncCoordinator.instance
+          .pendingSyncIdsForMap(mapId);
+      final safeUpserts = changes.upserts
+          .where(
+            (memo) => memo.syncId == null || !pending.contains(memo.syncId),
+          )
+          .toList();
+      final safeDeletes = changes.deletedSyncIds.difference(pending);
+      await DatabaseHelper.instance.upsertMemosForMap(mapId, safeUpserts);
+      await DatabaseHelper.instance.deleteMemosBySyncIds(mapId, safeDeletes);
+      if (!mounted) return;
+      setState(() => _collaborationError = null);
+      await _loadMemos();
+    } catch (error, stackTrace) {
+      appLog(
+        'Failed to apply collaboration changes: ${error.runtimeType}',
+        stackTrace,
+      );
+      if (!mounted) return;
+      setState(() {
+        _collaborationError = '同期した変更を反映できませんでした。再試行してください。';
+      });
     }
   }
 
@@ -455,9 +488,9 @@ class _MapScreenState extends State<MapScreen> {
     }
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('共同編集を利用するにはログインが必要です')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('共同編集を利用するにはログインが必要です')));
       return;
     }
     setState(() {
@@ -468,9 +501,9 @@ class _MapScreenState extends State<MapScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(result.message)));
       if (!result.success) {
         return;
       }
@@ -479,14 +512,17 @@ class _MapScreenState extends State<MapScreen> {
         ownerUid: currentUser.uid,
         isOwner: true,
         ownerEmail: currentUser.email,
+        remoteMapId: result.remoteMapId,
       );
       await _setupCollaboration();
     } catch (error, stackTrace) {
-      debugPrint('Failed to enable collaboration: $error');
-      debugPrintStack(stackTrace: stackTrace);
+      appLog(
+        'Failed to enable collaboration: ${error.runtimeType}',
+        stackTrace,
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('共同編集の有効化に失敗しました: $error')),
+          const SnackBar(content: Text('共同編集を有効にできませんでした。再試行してください。')),
         );
       }
     } finally {
@@ -504,8 +540,9 @@ class _MapScreenState extends State<MapScreen> {
       return;
     }
     await _stopCollaborationListener();
-    await CollaborationSyncCoordinator.instance
-        .unregisterCollaborativeMap(mapId);
+    await CollaborationSyncCoordinator.instance.unregisterCollaborativeMap(
+      mapId,
+    );
     if (!mounted) {
       return;
     }
@@ -513,9 +550,9 @@ class _MapScreenState extends State<MapScreen> {
       _collaborationMetadata = null;
       _collaborationError = null;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('共同編集を無効にしました')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('共同編集を無効にしました')));
     unawaited(_loadMemos());
   }
 
@@ -526,10 +563,10 @@ class _MapScreenState extends State<MapScreen> {
     }
     final theme = Theme.of(context);
     final hasError = _collaborationError != null;
-    final backgroundColor = theme.colorScheme.surfaceVariant.withOpacity(
-      theme.brightness == Brightness.dark ? 0.6 : 0.4,
-    );
-    final statusText = _collaborationError ??
+    final backgroundColor = theme.colorScheme.surfaceContainerHighest
+        .withValues(alpha: theme.brightness == Brightness.dark ? 0.6 : 0.4);
+    final statusText =
+        _collaborationError ??
         (metadata.isOwner ? '共同編集を有効化（所有者）' : '共同編集に参加中');
     final iconData = hasError ? Icons.error_outline : Icons.groups;
     return Container(
@@ -540,16 +577,12 @@ class _MapScreenState extends State<MapScreen> {
         children: [
           Icon(
             iconData,
-            color:
-                hasError ? theme.colorScheme.error : theme.colorScheme.primary,
+            color: hasError
+                ? theme.colorScheme.error
+                : theme.colorScheme.primary,
           ),
           const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              statusText,
-              style: theme.textTheme.bodySmall,
-            ),
-          ),
+          Expanded(child: Text(statusText, style: theme.textTheme.bodySmall)),
           if (_isCollaborationConnecting)
             const SizedBox(
               width: 16,
@@ -566,8 +599,9 @@ class _MapScreenState extends State<MapScreen> {
 
     if (widget.mapInfo != null) {
       // MapInfoがある場合は、そのIDでメモを読み込む
-      memos =
-          await DatabaseHelper.instance.readMemosByMapId(widget.mapInfo!.id);
+      memos = await DatabaseHelper.instance.readMemosByMapId(
+        widget.mapInfo!.id,
+      );
     } else {
       // MapInfoがない場合は、地図画像パスでメモを読み込む
       memos = await DatabaseHelper.instance.readMemosByMapPath(_customMapPath);
@@ -598,6 +632,7 @@ class _MapScreenState extends State<MapScreen> {
         'カスタム地図',
       );
     }
+    if (!mounted) return;
 
     // カスタム地図の場合、相対座標を緯度経度として使用
     final result = await Navigator.push(
@@ -611,6 +646,7 @@ class _MapScreenState extends State<MapScreen> {
         ),
       ),
     );
+    if (!mounted) return;
     if (result == true) {
       _loadMemos();
     }
@@ -619,9 +655,7 @@ class _MapScreenState extends State<MapScreen> {
   void _onMemoTap(Memo memo) async {
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => MemoDetailScreen(memo: memo),
-      ),
+      MaterialPageRoute(builder: (context) => MemoDetailScreen(memo: memo)),
     );
     if (result == true) {
       _loadMemos();
@@ -644,9 +678,9 @@ class _MapScreenState extends State<MapScreen> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.1),
+                color: Colors.orange.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
               ),
               child: const Row(
                 children: [
@@ -655,10 +689,7 @@ class _MapScreenState extends State<MapScreen> {
                   Expanded(
                     child: Text(
                       'この機能は開発中です。認識精度や機能が変更される可能性があります。',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.orange,
-                      ),
+                      style: TextStyle(fontSize: 12, color: Colors.orange),
                     ),
                   ),
                 ],
@@ -712,17 +743,19 @@ class _MapScreenState extends State<MapScreen> {
     });
 
     try {
-      print('Map Debug: 複数地点OCR処理開始');
-      print('Map Debug: 画像パス: ${imageFile.path}');
+      appLog('Map Debug: 複数地点OCR処理開始');
+      appLog('Map Debug: 画像パス: ${imageFile.path}');
 
       // 画像をバイト配列として読み込み
       final imageBytes = await imageFile.readAsBytes();
-      print('Map Debug: 画像サイズ: ${imageBytes.length} bytes');
+      appLog('Map Debug: 画像サイズ: ${imageBytes.length} bytes');
 
       // 複数地点OCR処理を実行
-      final result =
-          await AIService.recognizeMultipleRecordsFromImage(imageBytes);
-      print('Map Debug: 複数地点OCR結果: $result');
+      final result = await AIService.recognizeMultipleRecordsFromImage(
+        imageBytes,
+      );
+      if (!mounted) return;
+      appLog('Map Debug: 複数地点OCR結果: $result');
 
       if (result['success'] == true) {
         // OCR結果をダイアログで表示し、ユーザーに適用を確認
@@ -731,10 +764,11 @@ class _MapScreenState extends State<MapScreen> {
         throw Exception(result['error'] ?? '複数地点OCR処理に失敗しました');
       }
     } catch (e) {
-      print('Map Debug: 複数地点OCR処理エラー詳細:');
-      print('Map Debug: エラータイプ: ${e.runtimeType}');
-      print('Map Debug: エラーメッセージ: $e');
-      print('Map Debug: エラートレース: ${StackTrace.current}');
+      if (!mounted) return;
+      appLog('Map Debug: 複数地点OCR処理エラー詳細:');
+      appLog('Map Debug: エラータイプ: ${e.runtimeType}');
+      appLog('Map Debug: エラーメッセージ: $e');
+      appLog('Map Debug: エラートレース: ${StackTrace.current}');
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -750,11 +784,6 @@ class _MapScreenState extends State<MapScreen> {
                   style: const TextStyle(fontSize: 10, color: Colors.white70),
                 ),
               ],
-              const SizedBox(height: 4),
-              Text(
-                'エラー: ${e.toString()}',
-                style: const TextStyle(fontSize: 11, color: Colors.white70),
-              ),
             ],
           ),
           backgroundColor: Colors.red,
@@ -763,25 +792,23 @@ class _MapScreenState extends State<MapScreen> {
         ),
       );
     } finally {
-      setState(() {
-        _isOCRProcessing = false;
-      });
+      if (mounted) setState(() => _isOCRProcessing = false);
     }
   }
 
   // 複数地点OCR結果表示・適用ダイアログ
   Future<void> _showMultipleRecordsOCRResult(
-      Map<String, dynamic> result) async {
+    Map<String, dynamic> result,
+  ) async {
     final totalRecords = result['totalRecords'] ?? 0;
     final extractedText = result['extractedText'] ?? '';
     final records = result['records'] as List<dynamic>? ?? [];
-    final confidence = result['confidence'] ?? 'medium';
     final notes = result['notes'] ?? '';
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('📄 読み取り結果（${totalRecords}件の記録）'),
+        title: Text('📄 読み取り結果（$totalRecords件の記録）'),
         content: SizedBox(
           width: double.maxFinite,
           height: 400,
@@ -791,8 +818,10 @@ class _MapScreenState extends State<MapScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (extractedText.isNotEmpty) ...[
-                  const Text('📝 抽出されたテキスト:',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const Text(
+                    '📝 抽出されたテキスト:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(8),
@@ -801,13 +830,17 @@ class _MapScreenState extends State<MapScreen> {
                       color: Colors.grey.shade100,
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Text(extractedText,
-                        style: const TextStyle(fontSize: 12)),
+                    child: Text(
+                      extractedText,
+                      style: const TextStyle(fontSize: 12),
+                    ),
                   ),
                   const SizedBox(height: 12),
                 ],
-                const Text('📋 抽出された記録:',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text(
+                  '📋 抽出された記録:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 8),
                 ...records.asMap().entries.map((entry) {
                   final index = entry.key;
@@ -822,10 +855,13 @@ class _MapScreenState extends State<MapScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('記録 ${index + 1}',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.blue)),
+                        Text(
+                          '記録 ${index + 1}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue,
+                          ),
+                        ),
                         const SizedBox(height: 4),
                         if (record['title'] != null &&
                             record['title'].toString().isNotEmpty) ...[
@@ -845,7 +881,8 @@ class _MapScreenState extends State<MapScreen> {
                         if (record['latitude'] != null &&
                             record['longitude'] != null) ...[
                           Text(
-                              '座標: ${record['latitude'].toStringAsFixed(6)}, ${record['longitude'].toStringAsFixed(6)}'),
+                            '座標: ${record['latitude'].toStringAsFixed(6)}, ${record['longitude'].toStringAsFixed(6)}',
+                          ),
                           const SizedBox(height: 2),
                         ],
                         if (record['category'] != null &&
@@ -854,20 +891,24 @@ class _MapScreenState extends State<MapScreen> {
                           const SizedBox(height: 2),
                         ],
                         Text(
-                            '認識精度: ${_getConfidenceText(record['confidence'] ?? 'medium')}',
-                            style: TextStyle(
-                              color: _getConfidenceColor(
-                                  record['confidence'] ?? 'medium'),
-                              fontSize: 12,
-                            )),
+                          '認識精度: ${_getConfidenceText(record['confidence'] ?? 'medium')}',
+                          style: TextStyle(
+                            color: _getConfidenceColor(
+                              record['confidence'] ?? 'medium',
+                            ),
+                            fontSize: 12,
+                          ),
+                        ),
                       ],
                     ),
                   );
-                }).toList(),
+                }),
                 if (notes.isNotEmpty) ...[
                   const Divider(),
-                  const Text('備考:',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const Text(
+                    '備考:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
                   Text(notes, style: const TextStyle(fontSize: 12)),
                 ],
               ],
@@ -906,8 +947,9 @@ class _MapScreenState extends State<MapScreen> {
       for (final record in records) {
         try {
           // 同じレイヤーの既存メモを取得して次のピン番号を決定
-          final existingMemos =
-              await DatabaseHelper.instance.readMemosByMapId(currentMapId);
+          final existingMemos = await DatabaseHelper.instance.readMemosByMapId(
+            currentMapId,
+          );
           final layerMemos = existingMemos
               .where((memo) => (memo.layer ?? 0) == _currentLayer)
               .toList();
@@ -922,15 +964,15 @@ class _MapScreenState extends State<MapScreen> {
 
           // メモオブジェクトを作成
           final memo = Memo(
-            title: record['title']?.toString()?.trim() ?? '読み取り記録',
-            content: record['content']?.toString()?.trim() ?? '',
+            title: record['title']?.toString().trim() ?? '読み取り記録',
+            content: record['content']?.toString().trim() ?? '',
             latitude: record['latitude'],
             longitude: record['longitude'],
             discoveryTime: DateTime.now(), // 現在時刻をデフォルトとして使用
-            discoverer: record['discoverer']?.toString()?.trim(),
-            specimenNumber: record['specimenNumber']?.toString()?.trim(),
-            category: record['category']?.toString()?.trim(),
-            notes: record['notes']?.toString()?.trim(),
+            discoverer: record['discoverer']?.toString().trim(),
+            specimenNumber: record['specimenNumber']?.toString().trim(),
+            category: record['category']?.toString().trim(),
+            notes: record['notes']?.toString().trim(),
             pinNumber: nextPinNumber + successCount, // 順番にピン番号を割り当て
             mapId: currentMapId,
             layer: _currentLayer,
@@ -939,38 +981,42 @@ class _MapScreenState extends State<MapScreen> {
           // データベースに保存
           final savedMemo = await DatabaseHelper.instance.create(memo);
           try {
-            await CollaborationSyncCoordinator.instance
-                .onLocalMemoCreated(savedMemo);
+            await CollaborationSyncCoordinator.instance.onLocalMemoCreated(
+              savedMemo,
+            );
           } catch (error, stackTrace) {
-            debugPrint('Failed to sync imported memo: $error');
-            debugPrintStack(stackTrace: stackTrace);
+            appLog('Failed to sync imported memo: $error');
+            appLog('Stack trace', stackTrace);
           }
           successCount++;
         } catch (e) {
-          print('Map Debug: 記録の保存に失敗: ${record['title']}, エラー: $e');
+          appLog('Map Debug: 記録の保存に失敗: ${record['title']}, エラー: $e');
           failureCount++;
         }
       }
 
       // メモリストを再読み込み
       await _loadMemos();
+      if (!mounted) return;
 
       // 結果をユーザーに通知
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-              '複数地点記録を地図に追加しました\n成功: ${successCount}件, 失敗: ${failureCount}件'),
+            '複数地点記録を地図に追加しました\n成功: $successCount件, 失敗: $failureCount件',
+          ),
           backgroundColor: failureCount == 0 ? Colors.green : Colors.orange,
           duration: const Duration(seconds: 4),
         ),
       );
     } catch (e) {
-      print('Map Debug: 複数地点記録適用エラー: $e');
+      appLog('Map Debug: 複数地点記録適用エラー: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('複数地点記録の適用に失敗しました: ${e.toString()}'),
+        const SnackBar(
+          content: Text('複数地点記録を追加できませんでした。再試行してください。'),
           backgroundColor: Colors.red,
-          duration: const Duration(seconds: 4),
+          duration: Duration(seconds: 4),
         ),
       );
     }
@@ -1012,22 +1058,21 @@ class _MapScreenState extends State<MapScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(widget.mapInfo?.title ?? 'フィールドワーク記録'),
-            Text(_layerDisplayName(_currentLayer),
-                style: const TextStyle(fontSize: 12)),
+            Text(
+              _layerDisplayName(_currentLayer),
+              style: const TextStyle(fontSize: 12),
+            ),
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.edit),
-            tooltip: 'レイヤー名を変更',
-            onPressed: _renameCurrentLayer,
-          ),
           // レイヤー選択ボタン
           PopupMenuButton<int>(
             icon: const Icon(Icons.layers),
             tooltip: 'レイヤー選択',
             onSelected: (value) {
-              if (value == -1) {
+              if (value == -2) {
+                _renameCurrentLayer();
+              } else if (value == -1) {
                 // 新しいレイヤーを追加
                 final newLayer = (_layers.isNotEmpty ? _layers.last + 1 : 1);
                 setState(() {
@@ -1049,6 +1094,16 @@ class _MapScreenState extends State<MapScreen> {
               ),
               const PopupMenuDivider(),
               const PopupMenuItem<int>(
+                value: -2,
+                child: Row(
+                  children: [
+                    Icon(Icons.edit_outlined),
+                    SizedBox(width: 8),
+                    Text('現在のレイヤー名を変更'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem<int>(
                 value: -1,
                 child: Row(
                   children: [
@@ -1060,25 +1115,32 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ],
           ),
-          // OCRボタン（複数地点記録読み取り）
-          IconButton(
-            icon: _isOCRProcessing
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.document_scanner, color: Colors.purple),
-            tooltip: '複数地点記録を読み取り',
-            onPressed: _isOCRProcessing ? null : _performMultipleRecordsOCR,
-          ),
-          // 印刷ボタン
+          // その他の地図操作
           PopupMenuButton<String>(
-            icon: const Icon(Icons.print),
-            tooltip: '印刷',
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'その他の操作',
             onSelected: (value) async {
               try {
                 switch (value) {
+                  case 'ocr':
+                    if (FeatureFlags.aiEnabled) {
+                      await _performMultipleRecordsOCR();
+                    }
+                    break;
+                  case 'memo_list':
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => MemoListScreen(
+                          memos: _memos
+                              .where((m) => (m.layer ?? 0) == _currentLayer)
+                              .toList(),
+                          mapTitle: widget.mapInfo?.title ?? 'カスタム地図',
+                        ),
+                      ),
+                    );
+                    await _loadMemos();
+                    break;
                   case 'enable_collaboration':
                     await _enableCollaboration();
                     break;
@@ -1138,18 +1200,45 @@ class _MapScreenState extends State<MapScreen> {
                       mapImagePath: _customMapPath,
                       mapName: widget.mapInfo?.title ?? 'カスタム地図',
                     );
+                    if (!context.mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('PDFファイルを保存しました')),
                     );
                     break;
                 }
-              } catch (e) {
+              } catch (error, stackTrace) {
+                appLog('Map action failed: ${error.runtimeType}', stackTrace);
+                if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('印刷に失敗しました: $e')),
+                  const SnackBar(content: Text('操作を完了できませんでした。再試行してください。')),
                 );
               }
             },
             itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'memo_list',
+                child: Row(
+                  children: [
+                    const Icon(Icons.format_list_bulleted),
+                    const SizedBox(width: 8),
+                    Text('記録一覧（${_memos.length}件）'),
+                  ],
+                ),
+              ),
+              if (FeatureFlags.aiEnabled) ...[
+                PopupMenuItem(
+                  value: 'ocr',
+                  enabled: !_isOCRProcessing,
+                  child: const Row(
+                    children: [
+                      Icon(Icons.document_scanner_outlined),
+                      SizedBox(width: 8),
+                      Text('複数地点記録を読み取り'),
+                    ],
+                  ),
+                ),
+                const PopupMenuDivider(),
+              ],
               if (_collaborationMetadata == null)
                 PopupMenuItem(
                   value: 'enable_collaboration',
@@ -1164,9 +1253,9 @@ class _MapScreenState extends State<MapScreen> {
                             : Colors.black,
                       ),
                       const SizedBox(width: 8),
-                      Text(_isCollaborationConnecting
-                          ? '共同編集を準備中...'
-                          : '共同編集を有効化'),
+                      Text(
+                        _isCollaborationConnecting ? '共同編集を準備中...' : '共同編集を有効化',
+                      ),
                     ],
                   ),
                 )
@@ -1200,9 +1289,7 @@ class _MapScreenState extends State<MapScreen> {
                           : Colors.black,
                     ),
                     const SizedBox(width: 8),
-                    Text((_isUploading || _isDownloading)
-                        ? 'Syncing with Firebase...'
-                        : 'Upload to Firebase'),
+                    Text((_isUploading || _isDownloading) ? '同期中…' : 'クラウドへ保存'),
                   ],
                 ),
               ),
@@ -1218,9 +1305,9 @@ class _MapScreenState extends State<MapScreen> {
                           : Colors.black,
                     ),
                     const SizedBox(width: 8),
-                    Text((_isUploading || _isDownloading)
-                        ? 'Syncing with Firebase...'
-                        : 'Download from Firebase'),
+                    Text(
+                      (_isUploading || _isDownloading) ? '同期中…' : 'クラウドから取得',
+                    ),
                   ],
                 ),
               ),
@@ -1287,24 +1374,6 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ],
           ),
-          IconButton(
-            icon: const Icon(Icons.format_list_bulleted),
-            tooltip: '記録一覧',
-            onPressed: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => MemoListScreen(
-                    memos: _memos
-                        .where((m) => (m.layer ?? 0) == _currentLayer)
-                        .toList(),
-                    mapTitle: widget.mapInfo?.title ?? 'カスタム地図',
-                  ),
-                ),
-              );
-              _loadMemos();
-            },
-          ),
         ],
       ),
       body: Column(
@@ -1314,8 +1383,9 @@ class _MapScreenState extends State<MapScreen> {
           Expanded(
             child: CustomMapWidget(
               key: _mapWidgetKey,
-              memos:
-                  _memos.where((m) => (m.layer ?? 0) == _currentLayer).toList(),
+              memos: _memos
+                  .where((m) => (m.layer ?? 0) == _currentLayer)
+                  .toList(),
               onTap: _onMapTap,
               onMemoTap: _onMemoTap,
               customImagePath: _customMapPath,
@@ -1337,6 +1407,7 @@ class _MapScreenState extends State<MapScreen> {
               'カスタム地図',
             );
           }
+          if (!context.mounted) return;
 
           // 地図の中心座標で新規メモ作成画面に遷移
           final result = await Navigator.push(
@@ -1350,12 +1421,13 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
           );
+          if (!mounted) return;
           if (result == true) {
             _loadMemos();
           }
         },
-        child: const Icon(Icons.add),
         tooltip: '新しい記録を追加',
+        child: const Icon(Icons.add),
       ),
     );
   }

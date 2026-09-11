@@ -3,26 +3,31 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:provider/provider.dart';
-import 'package:location_memo/utils/offline_mode_provider.dart';
 import '../models/map_info.dart';
 import '../utils/database_helper.dart';
 import '../utils/collaboration_sync_coordinator.dart';
 import '../utils/firebase_map_service.dart';
+import '../utils/firebase_availability.dart';
+import '../utils/image_helper.dart';
+import '../utils/theme_provider.dart';
+import '../utils/sync_queue.dart';
 import 'add_map_screen.dart';
 import 'auth_screen.dart';
 import 'map_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({Key? key}) : super(key: key);
+  const HomeScreen({super.key});
   @override
-  _HomeScreenState createState() => _HomeScreenState();
+  State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
   List<MapInfo> _maps = [];
   bool _isLoading = true;
   int? _syncingMapId;
+  String? _loadError;
+  final Map<int, int> _memoCounts = {};
+  final Map<int, SyncStatus> _syncStatuses = {};
   @override
   void initState() {
     super.initState();
@@ -30,58 +35,70 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadMaps() async {
-    setState(() {
-      _isLoading = true;
-    });
+    if (mounted) setState(() => _isLoading = true);
     try {
       final maps = await DatabaseHelper.instance.readAllMaps();
+      final counts = <int, int>{};
+      final statuses = <int, SyncStatus>{};
+      await Future.wait(
+        maps.where((map) => map.id != null).map((map) async {
+          counts[map.id!] = (await DatabaseHelper.instance.readMemosByMapId(
+            map.id,
+          )).length;
+          statuses[map.id!] = await CollaborationSyncCoordinator.instance
+              .statusForMap(map.id!);
+        }),
+      );
+      if (!mounted) return;
       setState(() {
         _maps = maps;
+        _memoCounts
+          ..clear()
+          ..addAll(counts);
+        _syncStatuses
+          ..clear()
+          ..addAll(statuses);
+        _loadError = null;
       });
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('地図の読み込みに失敗しました: $e')),
-      );
-    } finally {
+    } catch (_) {
+      if (!mounted) return;
       setState(() {
-        _isLoading = false;
+        _loadError = '地図を読み込めませんでした。';
       });
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<bool> _ensureLoggedIn() async {
+    if (!FirebaseAvailability.isReady) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('クラウドへ接続できません。時間をおいて再試行してください。')),
+        );
+      }
+      return false;
+    }
     if (FirebaseAuth.instance.currentUser != null) {
       return true;
     }
     if (!mounted) {
       return false;
     }
-    final offlineModeProvider = context.read<OfflineModeProvider>();
-    if (offlineModeProvider.isOfflineMode) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('オフラインモードでは利用できません。設定からオンラインモードに切り替えてください'),
-        ),
-      );
-      return false;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('オンライン機能を利用するにはログインしてください'),
-      ),
-    );
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const AuthScreen()),
-    );
-    return FirebaseAuth.instance.currentUser != null;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('オンライン機能を利用するにはログインしてください')));
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const AuthScreen()));
+    return FirebaseAvailability.isReady &&
+        FirebaseAuth.instance.currentUser != null;
   }
 
   void _openMap(MapInfo mapInfo) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => MapScreen(mapInfo: mapInfo),
-      ),
+      MaterialPageRoute(builder: (context) => MapScreen(mapInfo: mapInfo)),
     ).then((_) {
       _loadMaps(); // 地図画面から戻ったら再読み込み
     });
@@ -112,9 +129,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.red,
-              ),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
               child: const Text('削除'),
             ),
           ],
@@ -124,22 +139,21 @@ class _HomeScreenState extends State<HomeScreen> {
     if (confirmed == true) {
       try {
         await DatabaseHelper.instance.deleteMap(mapInfo.id!);
-        await CollaborationSyncCoordinator.instance
-            .unregisterCollaborativeMap(mapInfo.id!);
-        // 地図ファイルも削除
-        if (mapInfo.imagePath != null) {
-          final file = File(mapInfo.imagePath!);
-          if (await file.exists()) {
-            await file.delete();
-          }
-        }
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('「${mapInfo.title}」を削除しました')),
+        await CollaborationSyncCoordinator.instance.unregisterCollaborativeMap(
+          mapInfo.id!,
         );
+        if (mapInfo.imagePath != null) {
+          await ImageHelper.deleteImage(mapInfo.imagePath!);
+        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('「${mapInfo.title}」を削除しました')));
         _loadMaps(); // 地図リストを再読み込み
-      } catch (e) {
+      } catch (_) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('地図の削除に失敗しました: $e')),
+          const SnackBar(content: Text('地図を削除できませんでした。再試行してください。')),
         );
       }
     }
@@ -149,11 +163,10 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!await _ensureLoggedIn()) {
       return;
     }
+    if (!mounted) return;
     if (mapInfo.id == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Save the map locally before uploading to Firebase.'),
-        ),
+        const SnackBar(content: Text('クラウドへ保存する前に地図を端末へ保存してください。')),
       );
       return;
     }
@@ -170,15 +183,26 @@ class _HomeScreenState extends State<HomeScreen> {
         showDialog<Widget>(
           context: context,
           barrierDismissible: false,
-          builder: (_) => const Center(
-            child: CircularProgressIndicator(),
-          ),
+          builder: (_) => const Center(child: CircularProgressIndicator()),
         );
       }
       final result = await FirebaseMapService.instance.uploadMap(mapInfo);
       if (!mounted) {
         return;
       }
+      if (result.success) {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          await CollaborationSyncCoordinator.instance.registerCollaborativeMap(
+            mapId: mapInfo.id!,
+            ownerUid: user.uid,
+            isOwner: true,
+            ownerEmail: user.email,
+            remoteMapId: result.remoteMapId,
+          );
+        }
+      }
+      if (!mounted) return;
       if (dialogShown) {
         Navigator.of(context, rootNavigator: true).pop();
         dialogShown = false;
@@ -192,16 +216,14 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       );
-    } catch (error) {
+    } catch (_) {
       if (mounted) {
         if (dialogShown) {
           Navigator.of(context, rootNavigator: true).pop();
           dialogShown = false;
         }
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Firebaseアップロード中にエラーが発生しました: $error'),
-          ),
+          const SnackBar(content: Text('クラウドへ保存できませんでした。通信状況を確認してください。')),
         );
       }
     } finally {
@@ -217,12 +239,10 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!await _ensureLoggedIn()) {
       return;
     }
+    if (!mounted) return;
     if (mapInfo.id == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content:
-              Text('Save the map locally before downloading it from Firebase.'),
-        ),
+        const SnackBar(content: Text('クラウドから取得する前に地図を端末へ保存してください。')),
       );
       return;
     }
@@ -239,12 +259,16 @@ class _HomeScreenState extends State<HomeScreen> {
         showDialog<Widget>(
           context: context,
           barrierDismissible: false,
-          builder: (_) => const Center(
-            child: CircularProgressIndicator(),
-          ),
+          builder: (_) => const Center(child: CircularProgressIndicator()),
         );
       }
-      final result = await FirebaseMapService.instance.downloadMap(mapInfo.id!);
+      final metadata = await CollaborationSyncCoordinator.instance.getMetadata(
+        mapInfo.id!,
+      );
+      final result = await FirebaseMapService.instance.downloadMap(
+        mapInfo.id!,
+        remoteMapId: metadata?.remoteMapId,
+      );
       if (!mounted) {
         return;
       }
@@ -254,34 +278,30 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       if (result.success) {
         await _loadMaps();
-        if (mapInfo.id != null &&
-            await CollaborationSyncCoordinator.instance
-                .isCollaborative(mapInfo.id!)) {
-          final currentUser = FirebaseAuth.instance.currentUser;
-          if (currentUser != null) {
-            await CollaborationSyncCoordinator.instance
-                .registerCollaborativeMap(
-              mapId: mapInfo.id!,
-              ownerUid: currentUser.uid,
-              isOwner: true,
-              ownerEmail: currentUser.email,
-            );
-          }
+        final currentUser = FirebaseAuth.instance.currentUser;
+        final localMapId = result.localMapId ?? mapInfo.id;
+        if (currentUser != null && localMapId != null) {
+          await CollaborationSyncCoordinator.instance.registerCollaborativeMap(
+            mapId: localMapId,
+            ownerUid: metadata?.ownerUid ?? currentUser.uid,
+            isOwner: metadata?.isOwner ?? true,
+            ownerEmail: metadata?.ownerEmail ?? currentUser.email,
+            remoteMapId: metadata?.remoteMapId,
+          );
         }
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.message)),
-      );
-    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(result.message)));
+    } catch (_) {
       if (mounted) {
         if (dialogShown) {
           Navigator.of(context, rootNavigator: true).pop();
           dialogShown = false;
         }
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to download map from Firebase: $error'),
-          ),
+          const SnackBar(content: Text('クラウドから取得できませんでした。通信状況を確認してください。')),
         );
       }
     } finally {
@@ -294,8 +314,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _renameMap(MapInfo mapInfo) async {
-    final TextEditingController controller =
-        TextEditingController(text: mapInfo.title);
+    final TextEditingController controller = TextEditingController(
+      text: mapInfo.title,
+    );
     final result = await showDialog<String>(
       context: context,
       builder: (BuildContext context) {
@@ -334,20 +355,18 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     if (result != null && result.isNotEmpty && result != mapInfo.title) {
       try {
-        final updatedMap = MapInfo(
-          id: mapInfo.id,
-          title: result,
-          imagePath: mapInfo.imagePath,
-        );
+        final updatedMap = mapInfo.copyWith(title: result);
         await DatabaseHelper.instance.updateMap(updatedMap);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('地図の名称を「$result」に変更しました')),
-        );
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('地図の名称を「$result」に変更しました')));
         _loadMaps(); // 地図リストを再読み込み
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('地図の名称変更に失敗しました: $e')),
-        );
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('地図の名称を変更できませんでした。')));
       }
     }
   }
@@ -357,11 +376,9 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('共有する前に地図を保存してください。'),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('共有する前に地図を保存してください。')));
       return;
     }
     if (!await _ensureLoggedIn()) {
@@ -374,12 +391,13 @@ class _HomeScreenState extends State<HomeScreen> {
     String? loadError;
     Future<void> loadSharedUsers() async {
       try {
-        final users =
-            await FirebaseMapService.instance.fetchSharedUsers(mapInfo.id!);
+        final users = await FirebaseMapService.instance.fetchSharedUsers(
+          mapInfo.id!,
+        );
         sharedUsers = users;
         loadError = null;
-      } catch (error) {
-        loadError = '共有情報の取得に失敗しました: $error';
+      } catch (_) {
+        loadError = '共有情報を取得できませんでした。通信状況を確認して再試行してください。';
       }
       isLoading = false;
     }
@@ -410,26 +428,21 @@ class _HomeScreenState extends State<HomeScreen> {
               final email = emailController.text.trim();
               if (email.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('共有する相手のメールアドレスを入力してください。'),
-                  ),
+                  const SnackBar(content: Text('共有する相手のメールアドレスを入力してください。')),
                 );
                 return;
               }
               setState(() {
                 isMutating = true;
               });
-              final result =
-                  await FirebaseMapService.instance.shareMapWithEmail(
-                mapId: mapInfo.id!,
-                email: email,
-              );
+              final result = await FirebaseMapService.instance
+                  .shareMapWithEmail(mapId: mapInfo.id!, email: email);
               if (!mounted) {
                 return;
               }
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(result.message)),
-              );
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text(result.message)));
               if (result.success) {
                 emailController.clear();
                 await refreshSharedUsers();
@@ -445,14 +458,16 @@ class _HomeScreenState extends State<HomeScreen> {
               setState(() {
                 isMutating = true;
               });
-              final result = await FirebaseMapService.instance
-                  .revokeSharedUser(mapId: mapInfo.id!, uid: uid);
+              final result = await FirebaseMapService.instance.revokeSharedUser(
+                mapId: mapInfo.id!,
+                uid: uid,
+              );
               if (!mounted) {
                 return;
               }
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(result.message)),
-              );
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text(result.message)));
               if (result.success) {
                 await refreshSharedUsers();
               }
@@ -520,18 +535,18 @@ class _HomeScreenState extends State<HomeScreen> {
                           else
                             Expanded(
                               child: sharedUsers.isEmpty
-                                  ? const Center(
-                                      child: Text('共有中のユーザーはいません。'),
-                                    )
+                                  ? const Center(child: Text('共有中のユーザーはいません。'))
                                   : ListView.builder(
                                       itemCount: sharedUsers.length,
                                       itemBuilder: (context, index) {
                                         final user = sharedUsers[index];
                                         return ListTile(
-                                          leading:
-                                              const Icon(Icons.person_outline),
+                                          leading: const Icon(
+                                            Icons.person_outline,
+                                          ),
                                           title: Text(user.email),
-                                          subtitle: user.displayName != null &&
+                                          subtitle:
+                                              user.displayName != null &&
                                                   user.displayName!.isNotEmpty
                                               ? Text(user.displayName!)
                                               : null,
@@ -541,7 +556,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 ? null
                                                 : () async {
                                                     await handleRevoke(
-                                                        user.uid);
+                                                      user.uid,
+                                                    );
                                                   },
                                             tooltip: '共有を解除',
                                           ),
@@ -603,8 +619,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Text(
-                            '地図の取得に失敗しました: ${snapshot.error}',
-                            style: const TextStyle(color: Colors.red),
+                            '地図を取得できませんでした。通信状況を確認して再試行してください。',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
                           ),
                           const SizedBox(height: 12),
                           OutlinedButton.icon(
@@ -625,9 +643,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     if (summaries.isEmpty) {
                       return const SizedBox(
                         height: 200,
-                        child: Center(
-                          child: Text('オンラインに保存された地図はありません。'),
-                        ),
+                        child: Center(child: Text('オンラインに保存された地図はありません。')),
                       );
                     }
                     return SizedBox(
@@ -645,8 +661,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           final key =
                               '${summary.ownerId}_${summary.mapId}_${summary.isShared}';
                           final isProcessing = activeKey == key;
-                          final buttonLabel =
-                              summary.isShared ? 'インポート' : 'ダウンロード';
+                          final buttonLabel = summary.isShared ? '追加' : '同期';
                           return Card(
                             margin: const EdgeInsets.symmetric(vertical: 6),
                             child: ListTile(
@@ -667,10 +682,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         setState(() {
                                           activeKey = key;
                                         });
-                                        await _handleRemoteDownload(
-                                          summary,
-                                          asImport: summary.isShared,
-                                        );
+                                        await _handleRemoteDownload(summary);
                                         if (mounted) {
                                           setState(() {
                                             activeKey = null;
@@ -682,7 +694,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                         width: 16,
                                         height: 16,
                                         child: CircularProgressIndicator(
-                                            strokeWidth: 2),
+                                          strokeWidth: 2,
+                                        ),
                                       )
                                     : Text(buttonLabel),
                               ),
@@ -715,42 +728,41 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _handleRemoteDownload(
-    FirebaseRemoteMapSummary summary, {
-    required bool asImport,
-  }) async {
+  Future<void> _handleRemoteDownload(FirebaseRemoteMapSummary summary) async {
     try {
       final result = await FirebaseMapService.instance.downloadMap(
         summary.mapId,
         ownerUid: summary.ownerId,
-        importAsCopy: asImport,
+        remoteMapId: summary.remoteMapId,
       );
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(result.message)));
       if (result.success) {
         await _loadMaps();
-        if (!asImport) {
+        final localMapId = result.localMapId;
+        if (localMapId != null) {
           final currentUser = FirebaseAuth.instance.currentUser;
           final isOwner = currentUser?.uid == summary.ownerId;
           await CollaborationSyncCoordinator.instance.registerCollaborativeMap(
-            mapId: summary.mapId,
+            mapId: localMapId,
             ownerUid: summary.ownerId,
             isOwner: isOwner,
             ownerEmail: summary.ownerEmail,
+            remoteMapId: summary.remoteMapId,
           );
         }
       }
-    } catch (error) {
+    } catch (_) {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('ダウンロードに失敗しました: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('ダウンロードに失敗しました。再試行してください。')));
     }
   }
 
@@ -785,9 +797,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               ListTile(
                 leading: const Icon(Icons.cloud_upload),
-                title: Text(_syncingMapId == mapInfo.id
-                    ? 'Syncing with Firebase...'
-                    : 'Upload to Firebase'),
+                title: Text(_syncingMapId == mapInfo.id ? '同期中…' : 'クラウドへ保存'),
                 enabled: _syncingMapId != mapInfo.id && mapInfo.id != null,
                 onTap: () async {
                   Navigator.pop(context);
@@ -796,9 +806,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               ListTile(
                 leading: const Icon(Icons.cloud_download),
-                title: Text(_syncingMapId == mapInfo.id
-                    ? 'Syncing with Firebase...'
-                    : 'Download from Firebase'),
+                title: Text(_syncingMapId == mapInfo.id ? '同期中…' : 'クラウドから取得'),
                 enabled: _syncingMapId != mapInfo.id && mapInfo.id != null,
                 onTap: () async {
                   Navigator.pop(context);
@@ -841,7 +849,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('フィールドワーク記録'),
+        title: const Text('位置メモ'),
         actions: [
           IconButton(
             icon: const Icon(Icons.cloud),
@@ -856,17 +864,17 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(),
-            )
+          ? const Center(child: CircularProgressIndicator())
+          : _loadError != null
+          ? _buildLoadError()
           : _maps.isEmpty
-              ? _buildEmptyState()
-              : _buildMapsList(),
+          ? _buildEmptyState()
+          : _buildMapsList(),
       floatingActionButton: _maps.isNotEmpty
           ? FloatingActionButton(
               onPressed: _addNewMap,
-              child: const Icon(Icons.add),
               tooltip: '新しい地図を追加',
+              child: const Icon(Icons.add),
             )
           : null,
     );
@@ -874,105 +882,179 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildEmptyState() {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.map_outlined, size: 64, color: Colors.grey),
-          const SizedBox(height: 16),
-          const Text(
-            'カスタム地図でフィールドワーク記録を作成',
-            style: TextStyle(color: Colors.grey, fontSize: 16),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            '地図画像をアップロードして記録を開始してください',
-            style: TextStyle(color: Colors.grey, fontSize: 12),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: _addNewMap,
-            icon: const Icon(Icons.add),
-            label: const Text('最初の地図を追加'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.map_outlined,
+              size: 72,
+              color: Theme.of(context).colorScheme.primary,
             ),
-          ),
-        ],
+            const SizedBox(height: 16),
+            Text(
+              'カスタム地図で記録を作成',
+              style: Theme.of(context).textTheme.titleMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '地図画像を追加して、\n記録を始めましょう。',
+              style: Theme.of(context).textTheme.bodyMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: _addNewMap,
+              icon: const Icon(Icons.add),
+              label: const Text('最初の地図を追加'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadError() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 56,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(_loadError!, textAlign: TextAlign.center),
+            const SizedBox(height: AppSpacing.md),
+            FilledButton.icon(
+              onPressed: _loadMaps,
+              icon: const Icon(Icons.refresh),
+              label: const Text('再試行'),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildMapsList() {
-    return ListView.builder(
-      padding: const EdgeInsets.all(16.0),
-      itemCount: _maps.length,
-      itemBuilder: (context, index) {
-        final map = _maps[index];
-        return Card(
-          margin: const EdgeInsets.only(bottom: 12.0),
-          child: InkWell(
-            onTap: () => _openMap(map),
-            onLongPress: () => _showMapOptions(map),
-            borderRadius: BorderRadius.circular(8.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (map.imagePath != null)
-                  Container(
-                    width: double.infinity,
-                    height: 150,
-                    decoration: BoxDecoration(
-                      borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(8.0),
-                      ),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(8.0),
-                      ),
-                      child: _buildImageWidget(map.imagePath!),
-                    ),
-                  ),
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              map.title,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'タップして地図を開く',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey.shade600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Icon(
-                        Icons.arrow_forward_ios,
-                        size: 16,
-                        color: Colors.grey.shade400,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 1100
+            ? 3
+            : constraints.maxWidth >= 680
+            ? 2
+            : 1;
+        return GridView.builder(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            crossAxisSpacing: AppSpacing.md,
+            mainAxisSpacing: AppSpacing.md,
+            childAspectRatio: columns == 1 ? 1.65 : 1.35,
           ),
+          itemCount: _maps.length,
+          itemBuilder: (context, index) => _buildMapCard(_maps[index]),
         );
       },
+    );
+  }
+
+  Widget _buildMapCard(MapInfo map) {
+    final theme = Theme.of(context);
+    final count = map.id == null ? 0 : (_memoCounts[map.id!] ?? 0);
+    final isSyncing = _syncingMapId == map.id;
+    final syncStatus = map.id == null
+        ? SyncStatus.synced
+        : (_syncStatuses[map.id!] ?? SyncStatus.synced);
+    final statusLabel = switch (syncStatus) {
+      SyncStatus.pending => '同期保留',
+      SyncStatus.syncing => '同期中',
+      SyncStatus.failed => '同期失敗・再試行待ち',
+      SyncStatus.synced => null,
+    };
+    return Card(
+      child: Semantics(
+        button: true,
+        label: '${map.title}、メモ$count件',
+        child: InkWell(
+          onTap: () => _openMap(map),
+          borderRadius: BorderRadius.circular(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (map.imagePath != null)
+                Expanded(
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: _buildImageWidget(map.imagePath!),
+                  ),
+                )
+              else
+                Expanded(
+                  child: ColoredBox(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    child: Center(
+                      child: Icon(
+                        Icons.map_outlined,
+                        size: 48,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            map.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            isSyncing
+                                ? '同期中…'
+                                : statusLabel == null
+                                ? 'メモ $count件'
+                                : 'メモ $count件・$statusLabel',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '${map.title}の操作メニュー',
+                      onPressed: () => _showMapOptions(map),
+                      icon: isSyncing
+                          ? const SizedBox.square(
+                              dimension: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.more_vert),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -988,11 +1070,7 @@ class _HomeScreenState extends State<HomeScreen> {
           return Container(
             color: Colors.grey.shade200,
             child: const Center(
-              child: Icon(
-                Icons.broken_image,
-                size: 48,
-                color: Colors.grey,
-              ),
+              child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
             ),
           );
         },
@@ -1006,11 +1084,7 @@ class _HomeScreenState extends State<HomeScreen> {
           return Container(
             color: Colors.grey.shade200,
             child: const Center(
-              child: Icon(
-                Icons.broken_image,
-                size: 48,
-                color: Colors.grey,
-              ),
+              child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
             ),
           );
         },

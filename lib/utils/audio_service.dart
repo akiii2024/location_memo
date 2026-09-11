@@ -1,14 +1,13 @@
+import 'app_logger.dart';
 import 'dart:io';
-import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:hive/hive.dart';
 
 // Web環境でのみWebAudioServiceをインポート
-import 'web_audio_service_stub.dart' if (dart.library.html) 'web_audio_service.dart';
+import 'web_audio_service_stub.dart'
+    if (dart.library.html) 'web_audio_service.dart';
 
 class AudioService {
   static FlutterSoundRecorder? _recorder;
@@ -25,14 +24,14 @@ class AudioService {
     try {
       if (kIsWeb) {
         // Web環境での初期化確認
-        print('Web環境での音声サービス初期化');
+        appLog('Web環境での音声サービス初期化');
       } else {
         await _initializeMobile();
       }
       _isInitialized = true;
-      print('AudioService 初期化完了');
+      appLog('AudioService 初期化完了');
     } catch (e) {
-      print('AudioService 初期化エラー: $e');
+      appLog('AudioService 初期化エラー: $e');
       rethrow;
     }
   }
@@ -55,7 +54,7 @@ class AudioService {
         return await _checkMobilePermissions();
       }
     } catch (e) {
-      print('権限チェックエラー: $e');
+      appLog('権限チェックエラー: $e');
       return false;
     }
   }
@@ -76,7 +75,7 @@ class AudioService {
   static Future<bool> startRecording() async {
     try {
       if (_isRecording) {
-        print('既に録音中です');
+        appLog('既に録音中です');
         return false;
       }
 
@@ -85,7 +84,7 @@ class AudioService {
 
       // 権限確認
       if (!await checkPermissions()) {
-        print('マイクの権限が必要です');
+        appLog('マイクの権限が必要です');
         return false;
       }
 
@@ -99,7 +98,7 @@ class AudioService {
         return await _startMobileRecording();
       }
     } catch (e) {
-      print('録音開始エラー: $e');
+      appLog('録音開始エラー: $e');
       return false;
     }
   }
@@ -119,10 +118,10 @@ class AudioService {
       );
 
       _isRecording = true;
-      print('モバイル録音開始: $_currentRecordingPath');
+      appLog('モバイル録音開始: $_currentRecordingPath');
       return true;
     } catch (e) {
-      print('モバイル録音開始エラー: $e');
+      appLog('モバイル録音開始エラー: $e');
       return false;
     }
   }
@@ -131,7 +130,7 @@ class AudioService {
   static Future<String?> stopRecording() async {
     try {
       if (!_isRecording) {
-        print('録音していません');
+        appLog('録音していません');
         return null;
       }
 
@@ -146,7 +145,7 @@ class AudioService {
         return await _stopMobileRecording();
       }
     } catch (e) {
-      print('録音停止エラー: $e');
+      appLog('録音停止エラー: $e');
       _isRecording = false;
       return null;
     }
@@ -157,10 +156,10 @@ class AudioService {
     try {
       await _recorder!.stopRecorder();
       _isRecording = false;
-      print('モバイル録音停止: $_currentRecordingPath');
+      appLog('モバイル録音停止: $_currentRecordingPath');
       return _currentRecordingPath;
     } catch (e) {
-      print('モバイル録音停止エラー: $e');
+      appLog('モバイル録音停止エラー: $e');
       _isRecording = false;
       return null;
     }
@@ -194,7 +193,7 @@ class AudioService {
         return await _playMobileAudio(filePath);
       }
     } catch (e) {
-      print('音声再生エラー: $e');
+      appLog('音声再生エラー: $e');
       return false;
     }
   }
@@ -203,7 +202,7 @@ class AudioService {
   static Future<bool> _playMobileAudio(String filePath) async {
     try {
       if (!File(filePath).existsSync()) {
-        print('音声ファイルが見つかりません: $filePath');
+        appLog('音声ファイルが見つかりません: $filePath');
         return false;
       }
 
@@ -216,10 +215,10 @@ class AudioService {
       );
 
       _isPlaying = true;
-      print('モバイル音声再生開始: $filePath');
+      appLog('モバイル音声再生開始: $filePath');
       return true;
     } catch (e) {
-      print('モバイル音声再生エラー: $e');
+      appLog('モバイル音声再生エラー: $e');
       return false;
     }
   }
@@ -234,7 +233,7 @@ class AudioService {
         await _stopMobilePlaying();
       }
     } catch (e) {
-      print('音声停止エラー: $e');
+      appLog('音声停止エラー: $e');
     }
   }
 
@@ -244,10 +243,10 @@ class AudioService {
       if (_isInitialized && _player != null) {
         await _player!.stopPlayer();
         _isPlaying = false;
-        print('モバイル音声再生停止');
+        appLog('モバイル音声再生停止');
       }
     } catch (e) {
-      print('モバイル音声停止エラー: $e');
+      appLog('モバイル音声停止エラー: $e');
     }
   }
 
@@ -264,19 +263,19 @@ class AudioService {
     try {
       if (kIsWeb) {
         // Web版: Base64データなので削除処理は不要
-        print('Web音声データクリア');
+        appLog('Web音声データクリア');
         return true;
       } else {
         final file = File(filePath);
         if (await file.exists()) {
           await file.delete();
-          print('音声ファイル削除: $filePath');
+          appLog('音声ファイル削除: $filePath');
           return true;
         }
         return false;
       }
     } catch (e) {
-      print('音声ファイル削除エラー: $e');
+      appLog('音声ファイル削除エラー: $e');
       return false;
     }
   }
@@ -347,9 +346,9 @@ class AudioService {
 
       _currentRecordingPath = null;
       _isInitialized = false;
-      print('AudioService リソース解放完了');
+      appLog('AudioService リソース解放完了');
     } catch (e) {
-      print('AudioService dispose エラー: $e');
+      appLog('AudioService dispose エラー: $e');
     }
   }
 }

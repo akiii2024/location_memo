@@ -52,4 +52,4 @@ class WebAudioService {
   static String getBrowserInfo() {
     return 'N/A (Not Web)';
   }
-} 
+}

@@ -1,15 +1,17 @@
+import 'app_logger.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ThemeProvider with ChangeNotifier {
-  static const String _themeKey = 'is_dark_mode';
-  bool _isDarkMode = false;
+  static const String _themeKey = 'theme_mode';
+  static const String _legacyThemeKey = 'is_dark_mode';
+  ThemeMode _themeMode = ThemeMode.system;
   SharedPreferences? _prefs;
   bool _isInitialized = false;
 
-  bool get isDarkMode => _isDarkMode;
+  bool get isDarkMode => _themeMode == ThemeMode.dark;
 
-  ThemeMode get themeMode => _isDarkMode ? ThemeMode.dark : ThemeMode.light;
+  ThemeMode get themeMode => _themeMode;
 
   ThemeProvider() {
     _loadTheme();
@@ -18,11 +20,23 @@ class ThemeProvider with ChangeNotifier {
   Future<void> _loadTheme() async {
     try {
       _prefs = await SharedPreferences.getInstance();
-      _isDarkMode = _prefs?.getBool(_themeKey) ?? false;
+      final storedMode = _prefs?.getString(_themeKey);
+      if (storedMode == 'light') {
+        _themeMode = ThemeMode.light;
+      } else if (storedMode == 'dark') {
+        _themeMode = ThemeMode.dark;
+      } else if (storedMode == 'system') {
+        _themeMode = ThemeMode.system;
+      } else {
+        final legacy = _prefs?.getBool(_legacyThemeKey);
+        _themeMode = legacy == null
+            ? ThemeMode.system
+            : (legacy ? ThemeMode.dark : ThemeMode.light);
+      }
     } catch (e) {
-      print('SharedPreferences初期化エラー: $e');
+      appLog('SharedPreferences初期化エラー: $e');
       // エラーが発生した場合はデフォルト値を使用
-      _isDarkMode = false;
+      _themeMode = ThemeMode.system;
     }
     _isInitialized = true;
     notifyListeners();
@@ -33,7 +47,7 @@ class ThemeProvider with ChangeNotifier {
       try {
         _prefs = await SharedPreferences.getInstance();
       } catch (e) {
-        print('SharedPreferences初期化エラー: $e');
+        appLog('SharedPreferences初期化エラー: $e');
         // エラーが発生した場合はnullのままにする
         _prefs = null;
       }
@@ -43,81 +57,159 @@ class ThemeProvider with ChangeNotifier {
 
   Future<void> toggleTheme() async {
     await _ensureInitialized();
-    _isDarkMode = !_isDarkMode;
-    try {
-      await _prefs?.setBool(_themeKey, _isDarkMode);
-    } catch (e) {
-      print('テーマ設定の保存エラー: $e');
-    }
-    notifyListeners();
+    await setThemeMode(
+      _themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark,
+    );
   }
 
   Future<void> setDarkMode(bool value) async {
+    await setThemeMode(value ? ThemeMode.dark : ThemeMode.light);
+  }
+
+  Future<void> setThemeMode(ThemeMode value) async {
     await _ensureInitialized();
-    _isDarkMode = value;
+    _themeMode = value;
     try {
-      await _prefs?.setBool(_themeKey, _isDarkMode);
+      await _prefs?.setString(_themeKey, value.name);
+      await _prefs?.remove(_legacyThemeKey);
     } catch (e) {
-      print('テーマ設定の保存エラー: $e');
+      appLog('テーマ設定の保存エラー: $e');
     }
     notifyListeners();
   }
 
-  // ライトテーマの定義
-  static ThemeData get lightTheme {
-    return ThemeData(
-      primarySwatch: Colors.blue,
-      brightness: Brightness.light,
-      fontFamily: 'NotoSansJP',
-      appBarTheme: const AppBarTheme(
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
-        elevation: 2,
-      ),
-      cardTheme: CardThemeData(
-        elevation: 2,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-      ),
-      // ライトモード時のタブバー設定を追加
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: Colors.white,
-        selectedItemColor: Colors.blue,
-        unselectedItemColor: Colors.grey,
-        type: BottomNavigationBarType.fixed,
-        elevation: 8,
-      ),
-    );
-  }
+  static ThemeData get lightTheme => _buildTheme(Brightness.light);
 
-  // ダークテーマの定義
-  static ThemeData get darkTheme {
-    return ThemeData(
-      primarySwatch: Colors.blue,
-      brightness: Brightness.dark,
+  static ThemeData get darkTheme => _buildTheme(Brightness.dark);
+
+  static ThemeData _buildTheme(Brightness brightness) {
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: const Color(0xFF2457A6),
+      brightness: brightness,
+      dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
+    );
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: colorScheme.outlineVariant),
+    );
+    final base = ThemeData(
+      useMaterial3: true,
+      brightness: brightness,
+      colorScheme: colorScheme,
       fontFamily: 'NotoSansJP',
-      appBarTheme: const AppBarTheme(
-        backgroundColor: Colors.grey,
-        foregroundColor: Colors.white,
-        elevation: 2,
-      ),
-      cardTheme: CardThemeData(
-        elevation: 2,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
+      visualDensity: VisualDensity.standard,
+    );
+
+    return base.copyWith(
+      scaffoldBackgroundColor: colorScheme.surface,
+      appBarTheme: AppBarTheme(
+        centerTitle: false,
+        elevation: 0,
+        scrolledUnderElevation: 1,
+        backgroundColor: colorScheme.surface,
+        foregroundColor: colorScheme.onSurface,
+        surfaceTintColor: colorScheme.surfaceTint,
+        titleTextStyle: base.textTheme.titleLarge?.copyWith(
+          color: colorScheme.onSurface,
+          fontWeight: FontWeight.w700,
         ),
       ),
-      scaffoldBackgroundColor: const Color(0xFF121212),
-      cardColor: const Color(0xFF1E1E1E),
-      // ダークモード時のタブバー設定を追加
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: Color(0xFF1E1E1E),
-        selectedItemColor: Colors.blue,
-        unselectedItemColor: Colors.grey,
-        type: BottomNavigationBarType.fixed,
-        elevation: 8,
+      cardTheme: CardThemeData(
+        elevation: 0,
+        margin: EdgeInsets.zero,
+        color: colorScheme.surfaceContainerLow,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: colorScheme.outlineVariant),
+        ),
       ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: colorScheme.surfaceContainerLowest,
+        border: border,
+        enabledBorder: border,
+        focusedBorder: border.copyWith(
+          borderSide: BorderSide(color: colorScheme.primary, width: 2),
+        ),
+        errorMaxLines: 2,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16,
+        ),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        height: 72,
+        elevation: 2,
+        indicatorColor: colorScheme.secondaryContainer,
+        labelTextStyle: WidgetStatePropertyAll(
+          base.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600),
+        ),
+      ),
+      navigationRailTheme: NavigationRailThemeData(
+        backgroundColor: colorScheme.surfaceContainerLow,
+        indicatorColor: colorScheme.secondaryContainer,
+        selectedIconTheme: IconThemeData(
+          color: colorScheme.onSecondaryContainer,
+        ),
+        selectedLabelTextStyle: base.textTheme.labelLarge?.copyWith(
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(48, 48),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          minimumSize: const Size(48, 48),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(48, 48),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+      ),
+      iconButtonTheme: const IconButtonThemeData(
+        style: ButtonStyle(minimumSize: WidgetStatePropertyAll(Size(48, 48))),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: colorScheme.surfaceContainerHigh,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: colorScheme.inverseSurface,
+        contentTextStyle: TextStyle(color: colorScheme.onInverseSurface),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      dividerTheme: DividerThemeData(color: colorScheme.outlineVariant),
     );
   }
+}
+
+abstract final class AppSpacing {
+  static const double xs = 4;
+  static const double sm = 8;
+  static const double md = 16;
+  static const double lg = 24;
+  static const double xl = 32;
+  static const double contentMaxWidth = 1200;
+  static const double navigationRailBreakpoint = 840;
 }

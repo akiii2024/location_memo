@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Location Memo</string>
+	<string>位置メモ</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -13,7 +13,13 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>location_memo</string>
+	<string>位置メモ</string>
+	<key>NSCameraUsageDescription</key>
+	<string>メモへ写真を添付するためにカメラを使用します。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>メモへ音声を記録するためにマイクを使用します。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>地図画像やメモへ添付する写真を選択するために写真ライブラリを使用します。</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -31,8 +37,6 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>

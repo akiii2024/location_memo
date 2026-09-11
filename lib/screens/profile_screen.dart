@@ -1,6 +1,6 @@
+import '../utils/app_logger.dart';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -76,23 +76,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final firestoreDisplayName = data != null
           ? data['displayName'] as String?
           : null;
-      final firestorePhotoUrl =
-          data != null ? data['photoUrl'] as String? : null;
+      final firestorePhotoUrl = data != null
+          ? data['photoUrl'] as String?
+          : null;
       final createdAt = data != null ? data['createdAt'] : null;
       final updatedAt = data != null ? data['updatedAt'] : null;
 
-      final initialDisplayName = (firestoreDisplayName?.trim().isNotEmpty ?? false)
+      final initialDisplayName =
+          (firestoreDisplayName?.trim().isNotEmpty ?? false)
           ? firestoreDisplayName!.trim()
           : (user.displayName ?? '');
 
       final trimmedFirestorePhotoUrl =
           firestorePhotoUrl != null && firestorePhotoUrl.trim().isNotEmpty
-              ? firestorePhotoUrl.trim()
-              : null;
+          ? firestorePhotoUrl.trim()
+          : null;
       final trimmedUserPhotoUrl =
           user.photoURL != null && user.photoURL!.trim().isNotEmpty
-              ? user.photoURL!.trim()
-              : null;
+          ? user.photoURL!.trim()
+          : null;
       final initialPhotoSource =
           trimmedFirestorePhotoUrl ?? trimmedUserPhotoUrl;
 
@@ -108,8 +110,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
             try {
               decodedPhotoBytes = base64Decode(base64Data);
             } catch (error) {
-              debugPrint('Failed to decode profile image data: $error');
+              appLog('Failed to decode profile image data: $error');
             }
+          }
+        } else if (initialPhotoSource.startsWith('gs://')) {
+          try {
+            decodedPhotoBytes = await _storage
+                .refFromURL(initialPhotoSource)
+                .getData(5 * 1024 * 1024);
+          } catch (error) {
+            appLog('Failed to load protected profile image: $error');
           }
         } else if (initialPhotoSource.startsWith('http')) {
           resolvedPhotoUrl = initialPhotoSource;
@@ -122,7 +132,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               resolvedPhotoUrl = initialPhotoSource;
             }
           } catch (error) {
-            debugPrint('Failed to access local profile image: $error');
+            appLog('Failed to access local profile image: $error');
             resolvedPhotoUrl = initialPhotoSource;
           }
         } else {
@@ -165,18 +175,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _isLoading = false;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('プロフィール情報の取得に失敗しました: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('プロフィール情報を取得できませんでした。')));
     }
   }
 
   Future<void> _saveProfile() async {
     if (_isAnonymous) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('ゲストアカウントでは表示名を変更できません。')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('ゲストアカウントでは表示名を変更できません。')));
       }
       return;
     }
@@ -188,9 +198,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('ユーザー情報を取得できませんでした。')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('ユーザー情報を取得できませんでした。')));
       }
       return;
     }
@@ -223,6 +233,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             .collection('userProfiles')
             .doc(currentUser.uid)
             .set(updateData, SetOptions(merge: true));
+        await _syncShareDirectory(currentUser);
       }
 
       if (!mounted) {
@@ -231,16 +242,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       FocusScope.of(context).unfocus();
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('プロフィールを更新しました')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('プロフィールを更新しました')));
 
       await _loadProfile(showLoading: false);
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('プロフィールの更新に失敗しました: $error')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('プロフィールを更新できませんでした。')));
       }
     } finally {
       if (mounted) {
@@ -255,9 +266,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('ユーザー情報を取得できませんでした。')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('ユーザー情報を取得できませんでした。')));
       }
       return;
     }
@@ -293,8 +304,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (mounted) {
       setState(() {
         _profileImageBytes = bytes;
-        _localPhotoPath =
-            imagePath.startsWith('data:image') ? null : imagePath;
+        _localPhotoPath = imagePath.startsWith('data:image') ? null : imagePath;
         _photoUrl = null;
         _isUploadingPhoto = true;
       });
@@ -319,29 +329,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
       );
 
-      final downloadUrl = await fileRef.getDownloadURL();
+      final storageUri = 'gs://${fileRef.bucket}/${fileRef.fullPath}';
 
       await FirebaseFirestore.instance
           .collection('userProfiles')
           .doc(user.uid)
-          .set(
-        {
-          'photoUrl': downloadUrl,
-          'updatedAt': FieldValue.serverTimestamp(),
-        },
-        SetOptions(merge: true),
-      );
+          .set({
+            'photoUrl': storageUri,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
 
-      await user.updatePhotoURL(downloadUrl);
+      await user.updatePhotoURL(storageUri);
       await user.reload();
 
       if (!mounted) {
         return;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('プロフィール画像を更新しました')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('プロフィール画像を更新しました')));
 
       await _loadProfile(showLoading: false);
     } catch (error) {
@@ -351,9 +358,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _localPhotoPath = previousLocalPhotoPath;
           _photoUrl = previousPhotoUrl;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('プロフィール画像の更新に失敗しました: $error')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('プロフィール画像を更新できませんでした。')));
       }
     } finally {
       if (mounted) {
@@ -383,7 +390,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         }
       }
     } catch (error) {
-      debugPrint('Failed to load selected profile image: $error');
+      appLog('Failed to load selected profile image: $error');
     }
     return null;
   }
@@ -443,10 +450,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
     } on FirebaseException catch (error) {
       if (error.code != 'object-not-found') {
-        debugPrint('Failed to delete old profile images: $error');
+        appLog('Failed to delete old profile images: $error');
       }
     } catch (error) {
-      debugPrint('Failed to delete old profile images: $error');
+      appLog('Failed to delete old profile images: $error');
     }
   }
 
@@ -456,8 +463,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     final dialogEmailController = TextEditingController(text: _email ?? '');
-    final dialogDisplayNameController =
-        TextEditingController(text: _displayNameController.text.trim());
+    final dialogDisplayNameController = TextEditingController(
+      text: _displayNameController.text.trim(),
+    );
     final dialogPasswordController = TextEditingController();
     final dialogConfirmPasswordController = TextEditingController();
     final dialogFormKey = GlobalKey<FormState>();
@@ -494,7 +502,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: Colors.red.withOpacity(0.1),
+                            color: Colors.red.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
@@ -614,23 +622,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               dialogDisplayNameController.text.trim(),
                             );
 
-                            if (mounted) {
+                            if (dialogContext.mounted) {
                               Navigator.of(dialogContext).pop(true);
                             }
                           } on FirebaseAuthException catch (error) {
-                            final message = _guestRegistrationErrorMessage(error);
-                            setStateDialog(() {
-                              errorMessage = message;
-                              isSubmitting = false;
-                            });
+                            final message = _guestRegistrationErrorMessage(
+                              error,
+                            );
+                            if (dialogContext.mounted) {
+                              setStateDialog(() {
+                                errorMessage = message;
+                                isSubmitting = false;
+                              });
+                            }
                             if (mounted) {
                               setState(() {
                                 _isConvertingGuest = false;
                               });
                             }
-                          } catch (error) {
+                          } catch (_) {
                             setStateDialog(() {
-                              errorMessage = '登録に失敗しました: $error';
+                              errorMessage =
+                                  '登録を完了できませんでした。入力内容と通信状況を確認してください。';
                               isSubmitting = false;
                             });
                             if (mounted) {
@@ -671,9 +684,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('アカウント登録が完了しました。')), 
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('アカウント登録が完了しました。')));
 
       await _loadProfile(showLoading: false);
     }
@@ -731,6 +744,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
         .collection('userProfiles')
         .doc(refreshedUser.uid)
         .set(updateData, SetOptions(merge: true));
+    await _syncShareDirectory(refreshedUser);
+  }
+
+  Future<void> _syncShareDirectory(User user) async {
+    final email = user.email?.trim().toLowerCase();
+    if (user.isAnonymous || email == null || email.isEmpty) {
+      return;
+    }
+
+    await FirebaseFirestore.instance
+        .collection('shareDirectory')
+        .doc(email)
+        .set({
+          'uid': user.uid,
+          'displayName': user.displayName,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
   }
 
   String _guestRegistrationErrorMessage(FirebaseAuthException error) {
@@ -751,7 +781,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       case 'provider-already-linked':
         return 'このゲストアカウントは既に登録済みです。';
       default:
-        return '登録に失敗しました: ${error.message ?? error.code}';
+        return '登録を完了できませんでした。入力内容を確認して再試行してください。';
     }
   }
 
@@ -774,7 +804,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       try {
         return FileImage(File(_localPhotoPath!));
       } catch (error) {
-        debugPrint('Failed to create FileImage: $error');
+        appLog('Failed to create FileImage: $error');
       }
     }
 
@@ -789,14 +819,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final imageProvider = _resolveProfileImageProvider();
     return CircleAvatar(
       radius: 48,
-      backgroundColor: theme.colorScheme.primary.withOpacity(0.1),
+      backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.1),
       backgroundImage: imageProvider,
       child: imageProvider == null
-          ? Icon(
-              Icons.person,
-              size: 48,
-              color: theme.colorScheme.primary,
-            )
+          ? Icon(Icons.person, size: 48, color: theme.colorScheme.primary)
           : null,
     );
   }
@@ -804,9 +830,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('プロフィール'),
-      ),
+      appBar: AppBar(title: const Text('プロフィール')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _buildContent(),
@@ -829,9 +853,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     final theme = Theme.of(context);
     final displayName = _displayNameController.text.trim();
-    final secondaryTextColor =
-        theme.textTheme.bodyMedium?.color?.withOpacity(0.7);
-    final noteTextColor = theme.textTheme.bodySmall?.color?.withOpacity(0.7);
+    final secondaryTextColor = theme.textTheme.bodyMedium?.color?.withValues(
+      alpha: 0.7,
+    );
+    final noteTextColor = theme.textTheme.bodySmall?.color?.withValues(
+      alpha: 0.7,
+    );
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -862,8 +889,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 const SizedBox(height: 16),
                 TextButton.icon(
-                  onPressed:
-                      (_isUploadingPhoto || _isAnonymous) ? null : _changeProfileImage,
+                  onPressed: (_isUploadingPhoto || _isAnonymous)
+                      ? null
+                      : _changeProfileImage,
                   icon: _isUploadingPhoto
                       ? const SizedBox(
                           width: 16,
@@ -879,8 +907,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     _isUploadingPhoto
                         ? 'アップロード中...'
                         : _isAnonymous
-                            ? 'ゲストアカウントでは変更できません'
-                            : '画像を変更',
+                        ? 'ゲストアカウントでは変更できません'
+                        : '画像を変更',
                   ),
                 ),
                 if (_isAnonymous) ...[
@@ -907,10 +935,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    '表示名の変更',
-                    style: theme.textTheme.titleMedium,
-                  ),
+                  Text('表示名の変更', style: theme.textTheme.titleMedium),
                   const SizedBox(height: 12),
                   Text(
                     'アプリ内で表示される名前を設定できます。',
@@ -943,7 +968,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withOpacity(0.05),
+                        color: theme.colorScheme.primary.withValues(
+                          alpha: 0.05,
+                        ),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
@@ -984,9 +1011,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ListTile(
                 leading: const Icon(Icons.badge_outlined),
                 title: const Text('アカウント種別'),
-                subtitle: Text(
-                  _isAnonymous ? 'ゲストアカウント' : '通常アカウント',
-                ),
+                subtitle: Text(_isAnonymous ? 'ゲストアカウント' : '通常アカウント'),
               ),
               const Divider(height: 0),
               ListTile(
@@ -1008,8 +1033,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   title: const Text('登録日時'),
                   subtitle: Text(_formatDateTime(_createdAt!)),
                 ),
-              if (_updatedAt != null)
-                const Divider(height: 0),
+              if (_updatedAt != null) const Divider(height: 0),
               if (_updatedAt != null)
                 ListTile(
                   leading: const Icon(Icons.update),
@@ -1028,10 +1052,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'ゲストアカウントの登録',
-                    style: theme.textTheme.titleMedium,
-                  ),
+                  Text('ゲストアカウントの登録', style: theme.textTheme.titleMedium),
                   const SizedBox(height: 12),
                   Text(
                     'メールアドレスとパスワードを設定すると、他の端末でも同じデータを利用できるようになります。',
@@ -1053,9 +1074,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.person_add_alt_1_outlined),
-                      label: Text(
-                        _isConvertingGuest ? '処理中...' : 'アカウント登録に進む',
-                      ),
+                      label: Text(_isConvertingGuest ? '処理中...' : 'アカウント登録に進む'),
                     ),
                   ),
                   const SizedBox(height: 8),

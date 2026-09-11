@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
   <!--
     If you are serving your web app in a path other than the root, change the
@@ -17,26 +17,28 @@
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
-  <meta name="description" content="位置情報付きメモアプリ">
+  <meta name="description" content="地図上の場所と観察記録を、写真や音声と一緒に整理できる位置メモアプリです。">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#1565C0">
 
   <!-- PWA meta tags -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="Location Memo">
+  <meta name="apple-mobile-web-app-title" content="位置メモ">
 
   <!-- iOS meta tags & icons -->
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png">
 
-  <title>Location Memo</title>
+  <title>位置メモ</title>
   <link rel="manifest" href="manifest.json">
   <style>
-    /* View-Transition 自体を作らせない（既に追加済）*/
+    /* Flutter側で管理するため、ブラウザのView Transitionを無効化する。 */
     @view-transition { navigation: none; }
 
-    /* 万一残留した場合に備えてポインタも殺す */
+    /* 画面遷移中に古いレイヤーが入力を奪わないようにする。 */
     html::view-transition-old(root),
     html::view-transition-new(root){
       pointer-events:none !important;

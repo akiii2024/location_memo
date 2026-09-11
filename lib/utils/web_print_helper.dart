@@ -1,3 +1,7 @@
+// ignore_for_file: deprecated_member_use, avoid_web_libraries_in_flutter
+// Flutter 3.35の正式対象であるJavaScriptビルド専用の条件付き実装。
+
+import 'app_logger.dart';
 import 'dart:html' as html;
 import 'dart:typed_data';
 
@@ -7,13 +11,13 @@ class WebPrintHelper {
     try {
       final blob = html.Blob([pdfBytes], 'application/pdf');
       final url = html.Url.createObjectUrlFromBlob(blob);
-      final anchor = html.AnchorElement(href: url)
+      html.AnchorElement(href: url)
         ..setAttribute('download', filename)
         ..click();
       html.Url.revokeObjectUrl(url);
-      print('PDF downloaded: $filename');
+      appLog('PDF downloaded: $filename');
     } catch (e) {
-      print('Web PDFダウンロードエラー: $e');
+      appLog('Web PDFダウンロードエラー: $e');
     }
   }
 
@@ -38,4 +42,4 @@ class WebPrintHelper {
       return 'Unknown';
     }
   }
-} 
+}

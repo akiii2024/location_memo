@@ -9,10 +9,10 @@ import 'add_map_screen.dart';
 import 'map_screen.dart';
 
 class MapListScreen extends StatefulWidget {
-  const MapListScreen({Key? key}) : super(key: key);
+  const MapListScreen({super.key});
 
   @override
-  _MapListScreenState createState() => _MapListScreenState();
+  State<MapListScreen> createState() => _MapListScreenState();
 }
 
 class _MapListScreenState extends State<MapListScreen> {
@@ -32,26 +32,24 @@ class _MapListScreenState extends State<MapListScreen> {
 
     try {
       final maps = await DatabaseHelper.instance.readAllMaps();
+      if (!mounted) return;
       setState(() {
         _maps = maps;
       });
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('地図の読み込みに失敗しました: $e')),
-      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('地図を読み込めませんでした。再試行してください。')));
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _openMap(MapInfo mapInfo) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => MapScreen(mapInfo: mapInfo),
-      ),
+      MaterialPageRoute(builder: (context) => MapScreen(mapInfo: mapInfo)),
     ).then((_) {
       _loadMaps(); // 地図画面から戻ったら再読み込み
     });
@@ -62,6 +60,7 @@ class _MapListScreenState extends State<MapListScreen> {
       context,
       MaterialPageRoute(builder: (context) => const AddMapScreen()),
     );
+    if (!mounted) return;
     if (result == true) {
       _loadMaps(); // 新しい地図が追加されたら再読み込み
     }
@@ -98,8 +97,10 @@ class _MapListScreenState extends State<MapListScreen> {
 
     try {
       await DatabaseHelper.instance.deleteMap(mapInfo.id!);
-      await CollaborationSyncCoordinator.instance
-          .unregisterCollaborativeMap(mapInfo.id!);
+      await CollaborationSyncCoordinator.instance.unregisterCollaborativeMap(
+        mapInfo.id!,
+      );
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('地図を削除しました'),
@@ -108,10 +109,11 @@ class _MapListScreenState extends State<MapListScreen> {
       );
 
       _loadMaps(); // リストを再読み込み
-    } catch (e) {
+    } catch (_) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('削除に失敗しました: $e'),
+        const SnackBar(
+          content: Text('地図を削除できませんでした。再試行してください。'),
           backgroundColor: Colors.red,
         ),
       );
@@ -132,17 +134,15 @@ class _MapListScreenState extends State<MapListScreen> {
         ],
       ),
       body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(),
-            )
+          ? const Center(child: CircularProgressIndicator())
           : _maps.isEmpty
-              ? _buildEmptyState()
-              : _buildMapsList(),
+          ? _buildEmptyState()
+          : _buildMapsList(),
       floatingActionButton: _maps.isNotEmpty
           ? FloatingActionButton(
               onPressed: _addNewMap,
-              child: const Icon(Icons.add),
               tooltip: '新しい地図を追加',
+              child: const Icon(Icons.add),
             )
           : null,
     );
@@ -153,7 +153,7 @@ class _MapListScreenState extends State<MapListScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.map_outlined, size: 64, color: Colors.grey),
+          const Icon(Icons.map_outlined, size: 64, color: Colors.grey),
           const SizedBox(height: 16),
           const Text(
             'カスタム地図がありません',
@@ -197,8 +197,8 @@ class _MapListScreenState extends State<MapListScreen> {
                   Container(
                     width: double.infinity,
                     height: 150,
-                    decoration: BoxDecoration(
-                      borderRadius: const BorderRadius.vertical(
+                    decoration: const BoxDecoration(
+                      borderRadius: BorderRadius.vertical(
                         top: Radius.circular(8.0),
                       ),
                     ),
@@ -268,11 +268,7 @@ class _MapListScreenState extends State<MapListScreen> {
           return Container(
             color: Colors.grey.shade200,
             child: const Center(
-              child: Icon(
-                Icons.broken_image,
-                size: 48,
-                color: Colors.grey,
-              ),
+              child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
             ),
           );
         },
@@ -286,11 +282,7 @@ class _MapListScreenState extends State<MapListScreen> {
           return Container(
             color: Colors.grey.shade200,
             child: const Center(
-              child: Icon(
-                Icons.broken_image,
-                size: 48,
-                color: Colors.grey,
-              ),
+              child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
             ),
           );
         },
